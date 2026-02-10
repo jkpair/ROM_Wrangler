@@ -25,6 +25,7 @@ const (
 	managePhaseExtractPreview
 	managePhaseExtracting
 	managePhaseReScan
+	managePhaseDedupFilter
 	managePhaseConvertPreview
 	managePhaseConverting
 	managePhaseArchiving
@@ -100,6 +101,12 @@ type ManageScreen struct {
 		total    int
 		filename string
 	}
+
+	// Duplicate/variant filter
+	variantGroups []organizer.VariantGroup
+	dedupSelected map[string]bool // key = file path, true = keep
+	dedupCursor   int
+	dedupFiltered []string // paths of files removed by dedup filter (for archiving)
 
 	// Archive deletion
 	archiveDeleted   bool
@@ -194,11 +201,14 @@ func (m *ManageScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		m.chdmanPath = msg.chdmanPath
 		m.extractable = nil // already extracted
 		m.buildSystemList()
-		// Skip review and go directly to convert, archive, or plan
-		if m.hasConvertibleFiles() {
+		// Check for variant groups before proceeding
+		m.variantGroups = organizer.DetectVariants(m.scanResult)
+		if len(m.variantGroups) > 0 {
+			m.initDedupFilter()
+			m.phase = managePhaseDedupFilter
+		} else if m.hasConvertibleFiles() {
 			m.phase = managePhaseConvertPreview
 		} else if len(m.extractProcessed) > 0 {
-			// No conversion needed but we have extracted archives to archive
 			m.phase = managePhaseArchiving
 			return m, m.startArchiveAll()
 		} else {
@@ -255,6 +265,8 @@ func (m *ManageScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 			return m.updateReview(msg)
 		case managePhaseExtractPreview:
 			return m.updateExtractPreview(msg)
+		case managePhaseDedupFilter:
+			return m.updateDedupFilter(msg)
 		case managePhaseConvertPreview:
 			return m.updateConvertPreview(msg)
 		case managePhaseConverting:
@@ -311,10 +323,16 @@ func (m *ManageScreen) updateReview(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 		if m.scanResult != nil && (len(m.scanResult.Files) > 0 || m.hasExtractableFiles()) {
 			if m.hasExtractableFiles() {
 				m.phase = managePhaseExtractPreview
-			} else if m.hasConvertibleFiles() {
-				m.phase = managePhaseConvertPreview
 			} else {
-				m.goToPlan()
+				m.variantGroups = organizer.DetectVariants(m.scanResult)
+				if len(m.variantGroups) > 0 {
+					m.initDedupFilter()
+					m.phase = managePhaseDedupFilter
+				} else if m.hasConvertibleFiles() {
+					m.phase = managePhaseConvertPreview
+				} else {
+					m.goToPlan()
+				}
 			}
 		}
 	}
@@ -453,11 +471,13 @@ func (m *ManageScreen) startConversion() tea.Cmd {
 	)
 }
 
-// startArchiveAll archives both extracted archives (.rar/.zip/.7z/.ecm) and
-// conversion originals (.cue/.gdi + track files) in a single step.
+// startArchiveAll archives extracted archives (.rar/.zip/.7z/.ecm),
+// conversion originals (.cue/.gdi + track files), and dedup-filtered
+// variant files in a single step.
 func (m *ManageScreen) startArchiveAll() tea.Cmd {
 	convertResults := m.convertResults
 	extractProcessed := m.extractProcessed
+	dedupFiltered := m.dedupFiltered
 	sourceRoots := m.cfg.SourceDirs
 	archiveDir := filepath.Join(sourceRoots[0], "_archive")
 
@@ -475,6 +495,13 @@ func (m *ManageScreen) startArchiveAll() tea.Cmd {
 		// Archive extracted archives (rar/zip/7z/ecm files)
 		if len(extractProcessed) > 0 {
 			result := organizer.ArchiveExtractedZips(extractProcessed, sourceRoots, archiveDir)
+			combined.FilesMoved += result.FilesMoved
+			combined.Errors = append(combined.Errors, result.Errors...)
+		}
+
+		// Archive dedup-filtered files (unselected variants)
+		if len(dedupFiltered) > 0 {
+			result := organizer.ArchiveFilteredFiles(dedupFiltered, sourceRoots, archiveDir)
 			combined.FilesMoved += result.FilesMoved
 			combined.Errors = append(combined.Errors, result.Errors...)
 		}
@@ -581,6 +608,8 @@ func (m *ManageScreen) View() string {
 		return m.viewExtracting()
 	case managePhaseReScan:
 		return m.viewReScan()
+	case managePhaseDedupFilter:
+		return m.viewDedupFilter()
 	case managePhaseConvertPreview:
 		return m.viewConvertPreview()
 	case managePhaseConverting:
@@ -944,6 +973,196 @@ func (m *ManageScreen) viewResults() string {
 		helpText = "d: delete archive  enter/esc: done"
 	}
 	s += "\n" + tui.StyleDim.Render(helpText)
+	return lipgloss.NewStyle().Padding(1, 2).Render(s)
+}
+
+// --- Dedup filter methods ---
+
+// dedupFlatItem represents one row in the dedup filter UI.
+type dedupFlatItem struct {
+	isHeader  bool
+	groupIdx  int
+	path      string
+	groupName string
+}
+
+func (m *ManageScreen) buildDedupFlatList() []dedupFlatItem {
+	var items []dedupFlatItem
+	for gi, g := range m.variantGroups {
+		info, _ := systems.GetSystem(g.System)
+		items = append(items, dedupFlatItem{
+			isHeader:  true,
+			groupIdx:  gi,
+			groupName: g.BaseName + " (" + info.DisplayName + ")",
+		})
+		for _, f := range g.Files {
+			items = append(items, dedupFlatItem{
+				isHeader: false,
+				groupIdx: gi,
+				path:     f.Path,
+			})
+		}
+	}
+	return items
+}
+
+func (m *ManageScreen) initDedupFilter() {
+	m.dedupSelected = make(map[string]bool)
+	m.dedupCursor = 0
+	m.dedupFiltered = nil
+
+	for _, g := range m.variantGroups {
+		// Pre-select the first file (highest region priority, e.g. USA)
+		for i, f := range g.Files {
+			if i == 0 {
+				m.dedupSelected[f.Path] = true
+			}
+		}
+	}
+}
+
+func (m *ManageScreen) updateDedupFilter(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
+	items := m.buildDedupFlatList()
+	maxIdx := len(items) - 1
+
+	switch {
+	case key.Matches(msg, tui.Keys.Back):
+		m.phase = managePhaseReview
+	case key.Matches(msg, tui.Keys.Up):
+		if m.dedupCursor > 0 {
+			m.dedupCursor--
+		}
+	case key.Matches(msg, tui.Keys.Down):
+		if m.dedupCursor < maxIdx {
+			m.dedupCursor++
+		}
+	case key.Matches(msg, tui.Keys.Space):
+		if m.dedupCursor >= 0 && m.dedupCursor <= maxIdx {
+			item := items[m.dedupCursor]
+			if !item.isHeader {
+				if m.dedupSelected[item.path] {
+					delete(m.dedupSelected, item.path)
+				} else {
+					m.dedupSelected[item.path] = true
+				}
+			}
+		}
+	case key.Matches(msg, tui.Keys.Select): // 'a' key
+		if m.dedupCursor >= 0 && m.dedupCursor <= maxIdx {
+			item := items[m.dedupCursor]
+			gi := item.groupIdx
+			g := m.variantGroups[gi]
+			allSelected := true
+			for _, f := range g.Files {
+				if !m.dedupSelected[f.Path] {
+					allSelected = false
+					break
+				}
+			}
+			for _, f := range g.Files {
+				if allSelected {
+					delete(m.dedupSelected, f.Path)
+				} else {
+					m.dedupSelected[f.Path] = true
+				}
+			}
+		}
+	case msg.String() == "s":
+		// Skip filtering entirely (keep all variants)
+		m.dedupFiltered = nil
+		return m.advanceFromDedup()
+	case key.Matches(msg, tui.Keys.Enter):
+		m.applyDedupFilter()
+		return m.advanceFromDedup()
+	}
+	return m, nil
+}
+
+func (m *ManageScreen) applyDedupFilter() {
+	var toRemove []string
+	for _, g := range m.variantGroups {
+		for _, f := range g.Files {
+			if !m.dedupSelected[f.Path] {
+				toRemove = append(toRemove, f.Path)
+			}
+		}
+	}
+	if len(toRemove) > 0 {
+		m.dedupFiltered = toRemove
+		m.scanResult.RemoveFiles(toRemove)
+		m.buildSystemList()
+	}
+}
+
+func (m *ManageScreen) advanceFromDedup() (tui.Screen, tea.Cmd) {
+	if m.hasConvertibleFiles() {
+		m.phase = managePhaseConvertPreview
+	} else if len(m.extractProcessed) > 0 || len(m.dedupFiltered) > 0 {
+		m.phase = managePhaseArchiving
+		return m, m.startArchiveAll()
+	} else {
+		m.goToPlan()
+	}
+	return m, nil
+}
+
+func (m *ManageScreen) viewDedupFilter() string {
+	s := tui.StyleSubtitle.Render("Filter Duplicate Versions") + "\n\n"
+
+	items := m.buildDedupFlatList()
+
+	// Count stats
+	totalFiles := 0
+	selectedCount := 0
+	for _, g := range m.variantGroups {
+		totalFiles += len(g.Files)
+		for _, f := range g.Files {
+			if m.dedupSelected[f.Path] {
+				selectedCount++
+			}
+		}
+	}
+
+	s += fmt.Sprintf("Found %d games with %d total variants\n",
+		len(m.variantGroups), totalFiles)
+	s += fmt.Sprintf("Keeping %d, archiving %d\n\n",
+		selectedCount, totalFiles-selectedCount)
+
+	// Render list with scrolling
+	viewportHeight := m.height - 12
+	if viewportHeight < 5 {
+		viewportHeight = 5
+	}
+	startIdx := 0
+	if m.dedupCursor > viewportHeight-3 {
+		startIdx = m.dedupCursor - viewportHeight + 3
+	}
+
+	for i := startIdx; i < len(items) && i < startIdx+viewportHeight; i++ {
+		item := items[i]
+		if item.isHeader {
+			cursor := "  "
+			if i == m.dedupCursor {
+				cursor = tui.StyleMenuCursor.String()
+			}
+			s += cursor + tui.StyleSelected.Render(item.groupName) + "\n"
+		} else {
+			cursor := "    "
+			if i == m.dedupCursor {
+				cursor = "  " + tui.StyleMenuCursor.String()
+			}
+
+			check := "[ ] "
+			if m.dedupSelected[item.path] {
+				check = tui.StyleSuccess.Render("[x] ")
+			}
+
+			name := filepath.Base(item.path)
+			s += cursor + check + name + "\n"
+		}
+	}
+
+	s += "\n" + tui.StyleDim.Render("space: toggle  a: toggle group  enter: confirm  s: skip  esc: back")
 	return lipgloss.NewStyle().Padding(1, 2).Render(s)
 }
 

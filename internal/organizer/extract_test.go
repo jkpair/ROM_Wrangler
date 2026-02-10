@@ -73,7 +73,7 @@ func addBinaryToZip(t *testing.T, zipPath string, name string, data []byte) {
 	w.Close()
 }
 
-func TestFindExtractable_DiscSystemOnly(t *testing.T) {
+func TestFindExtractable_AllSystemTypes(t *testing.T) {
 	dir := t.TempDir()
 
 	// Disc-based system (Dreamcast) with a zip
@@ -83,20 +83,24 @@ func TestFindExtractable_DiscSystemOnly(t *testing.T) {
 		"track01.bin": "data",
 	})
 
-	// Cartridge system (NES) with a zip — should NOT be found
+	// Cartridge system (NES) with a zip — should also be found
 	nesDir := filepath.Join(dir, "nes")
 	os.MkdirAll(nesDir, 0755)
 	createTestZip(t, filepath.Join(nesDir, "game.zip"), map[string]string{
 		"game.nes": "data",
 	})
 
+	// Unrecognized folder — should NOT be found
+	unknownDir := filepath.Join(dir, "unknown_system")
+	os.MkdirAll(unknownDir, 0755)
+	createTestZip(t, filepath.Join(unknownDir, "game.zip"), map[string]string{
+		"file.bin": "data",
+	})
+
 	result := FindExtractable([]string{dir}, nil)
 
-	if len(result) != 1 {
-		t.Fatalf("expected 1 extractable, got %d", len(result))
-	}
-	if result[0].System != systems.SegaDC {
-		t.Errorf("expected system %s, got %s", systems.SegaDC, result[0].System)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 extractable, got %d", len(result))
 	}
 }
 

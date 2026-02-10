@@ -106,6 +106,30 @@ func ExecuteArchive(plan *ArchivePlan, progressFn func(current, total int, filen
 	return result
 }
 
+// ArchiveFilteredFiles moves dedup-filtered variant files to the archive
+// directory, preserving their relative path from the source roots.
+func ArchiveFilteredFiles(paths []string, sourceRoots []string, archiveDir string) *ArchiveResult {
+	result := &ArchiveResult{}
+
+	for _, filePath := range paths {
+		relPath := computeRelativePath(sourceRoots, filePath)
+		archivePath := filepath.Join(archiveDir, relPath)
+
+		if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("mkdir %s: %w", archivePath, err))
+			continue
+		}
+
+		if err := moveFile(filePath, archivePath); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("move %s: %w", filePath, err))
+			continue
+		}
+		result.FilesMoved++
+	}
+
+	return result
+}
+
 // moveFile attempts os.Rename first, falling back to copy+delete for
 // cross-device moves.
 func moveFile(src, dst string) error {

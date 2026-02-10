@@ -57,7 +57,7 @@ func FindUnecm() string {
 }
 
 // FindExtractable walks source directories and finds archive files (.zip,
-// .7z, .rar) in disc-based system subdirectories.
+// .7z, .rar) in any recognized system subdirectory.
 func FindExtractable(dirs []string, aliases map[string]string) []ExtractableFile {
 	var result []ExtractableFile
 
@@ -77,8 +77,7 @@ func FindExtractable(dirs []string, aliases map[string]string) []ExtractableFile
 				continue
 			}
 
-			info, ok := systems.AllSystems[systemID]
-			if !ok || !info.IsDiscBased {
+			if _, ok := systems.AllSystems[systemID]; !ok {
 				continue
 			}
 
