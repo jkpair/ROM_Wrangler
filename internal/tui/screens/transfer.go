@@ -201,7 +201,11 @@ func (t *TransferScreen) buildPlan() tea.Cmd {
 		if len(cfg.SourceDirs) > 0 {
 			sourceDir = cfg.SourceDirs[0]
 		}
-		plan, err := transfer.BuildTransferPlan(backend, sourceDir, cfg.Device.ROMPath, cfg.Transfer.SyncMode)
+		remoteBase := cfg.Device.ROMPath
+		if _, ok := backend.(*transfer.USBBackend); ok {
+			remoteBase = ""
+		}
+		plan, err := transfer.BuildTransferPlan(backend, sourceDir, remoteBase, cfg.Transfer.SyncMode)
 		return transferPlanMsg{plan: plan, err: err}
 	}
 }

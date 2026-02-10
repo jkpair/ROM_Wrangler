@@ -100,6 +100,29 @@ func TestDetectVariants_CrossSystem(t *testing.T) {
 	}
 }
 
+func TestDetectVariants_IgnoresMultiDisc(t *testing.T) {
+	scan := &ScanResult{
+		Files: []ScannedFile{
+			{Path: "/roms/psx/Final Fantasy VII (USA) (Disc 1).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Final Fantasy VII (USA) (Disc 2).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Final Fantasy VII (USA) (Disc 3).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Game (USA) (Disc 1 of 2).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Game (USA) (Disc 2 of 2).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Game (USA) (Disk 1).chd", System: systems.SonyPSX},
+			{Path: "/roms/psx/Game (USA) (Disk 2).chd", System: systems.SonyPSX},
+		},
+		BySystem: map[systems.SystemID][]ScannedFile{},
+	}
+
+	groups := DetectVariants(scan)
+	if len(groups) != 0 {
+		t.Errorf("expected 0 variant groups for multi-disc games, got %d", len(groups))
+		for _, g := range groups {
+			t.Logf("  group %q: %d files", g.BaseName, len(g.Files))
+		}
+	}
+}
+
 func TestRemoveFiles(t *testing.T) {
 	scan := &ScanResult{
 		Files: []ScannedFile{

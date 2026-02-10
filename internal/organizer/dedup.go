@@ -104,6 +104,12 @@ func DetectVariants(scanResult *ScanResult) []VariantGroup {
 	for _, f := range scanResult.Files {
 		name := filepath.Base(f.Path)
 		nameNoExt := strings.TrimSuffix(name, filepath.Ext(name))
+
+		// Skip multi-disc files — they share a base name but are not duplicates
+		if multidisc.HasDiscPattern(nameNoExt) {
+			continue
+		}
+
 		base := BaseGameName(nameNoExt)
 
 		key := groupKey{baseName: base, system: f.System}
