@@ -2,30 +2,34 @@
 
 A terminal UI application for organizing, converting, and transferring ROMs and disc images to retro gaming devices. Built for [ReplayOS](https://replayos.com) on Raspberry Pi, with an extensible architecture for other targets.
 
-ROM Wrangler handles the full workflow: scan your ROM collection, extract disc image archives, convert to CHD, clean up filenames, detect multi-disc sets and generate M3U playlists, and transfer everything to your device over SFTP or USB.
+ROM Wrangler handles the full workflow: scan your ROM collection, extract archives, decompress ECM files, convert disc images to CHD, generate M3U playlists for multi-disc games, clean up redundant files, and transfer everything to your device over SFTP or USB.
 
 ## Features
 
-- **50+ supported systems** across 15 manufacturers (Atari, Bandai, Coleco, Commodore, GCE, Magnavox/Philips, Mattel, Microsoft, NEC, Nintendo, Panasonic, Sega, SNK, Sony, plus arcade and home computers)
-- **Smart folder detection** — 100+ aliases map common names like `genesis`, `psx`, `snes` to the correct system
-- **Archive extraction** — automatically extracts .zip, .7z, and .rar archives in disc-based system folders into per-game subfolders, preventing track file name collisions
+- **50 supported systems** across 16 manufacturers — Amstrad, Atari, Commodore, Microsoft, NEC, Nintendo, Panasonic, Philips, Sega, Sharp, Sinclair, SNK, Sony, plus arcade (FBNeo, MAME, MAME 2K3+, Naomi/Atomiswave) and home computers (DOS, ScummVM)
+- **Smart folder detection** — 100+ aliases map common names like `genesis`, `psx`, `snes`, `mame`, `dreamcast` to the correct ReplayOS folder structure
+- **Archive extraction** — extracts .zip, .7z, and .rar archives in disc-based system folders into per-game subfolders, preventing track file name collisions
 - **Native ECM decompression** — decompresses .bin.ecm files to .bin with no external tools required
 - **Iterative extraction** — handles nested archives (e.g. a .rar containing a .bin.ecm) by re-scanning after each pass
-- **CHD conversion** — batch convert GDI, CUE/BIN, and ISO disc images to CHD via chdman, with live progress
-- **CUE file auto-repair** — fixes case mismatches in FILE references (e.g. `.BIN` vs `.bin`) and patches `.bin.ecm` references after ECM decompression
+- **CHD conversion** — batch convert GDI, CUE/BIN, and ISO disc images to CHD via chdman, with live per-file progress
+- **CUE file auto-repair** — fixes case mismatches in FILE references and patches `.bin.ecm` references after ECM decompression
 - **Multi-disc detection** — automatically groups disc sets and generates M3U playlists
 - **Game identification** — hash-based lookup via No-Intro/Redump DAT files and ScreenScraper API
 - **Filename cleaning** — strips dump tags (`[!]`, `[b1]`, serials) while preserving region and disc info
-- **Transfer** — SFTP (tuned for maximum throughput) or USB/SD card copy, with progress bars
+- **High-performance transfers** — SFTP with concurrent writes/reads and 256KB buffer pooling, or USB with 1MB buffers and Linux `fallocate` pre-allocation
+- **Parallel transfers** — configurable concurrency for transferring multiple files simultaneously
+- **Transfer cancellation** — press Esc during a transfer to cancel in-flight uploads
 - **Sync mode** — skip files that already exist on the destination (by size match)
-- **Deferred archiving** — original disc images and extracted archives are moved to `_archive/` only after successful conversion, with optional auto-deletion
+- **BIOS setup** — guided BIOS file organization for all supported systems
+- **Deferred archiving** — original disc images and spent archives are moved to `_archive/` only after successful conversion, with optional auto-deletion
+- **Redundant file cleanup** — detect and archive duplicate versions, superseded disc images, and already-extracted archives
 - **SQLite cache** — scraping results are cached locally so repeat lookups are instant
 - **Config file** — YAML config at `~/.config/romwrangler/config.yaml`, editable in the TUI or by hand
 - **No CGo** — pure Go build using modernc.org/sqlite, compiles anywhere Go runs
 
 ## Requirements
 
-- **Go 1.23+** to build from source
+- **Go 1.25+** to build from source
 - **chdman** (optional) — for disc image conversion, part of MAME tools
 - **7z** (optional) — for extracting .7z and .rar archives (p7zip or 7-zip)
 
@@ -114,7 +118,7 @@ make run
    /home/you/roms/
      nintendo_nes/
        Super Mario Bros. (USA).nes
-     sega_md/
+     sega_smd/
        Sonic the Hedgehog (USA).md
      sony_psx/
        Final Fantasy VII (USA) (Disc 1).chd
@@ -123,7 +127,20 @@ make run
        Final Fantasy VII (USA).m3u
    ```
 
-5. **Transfer to your device:** Go to **Transfer** and choose SFTP, USB, or manual. Files are transferred from your source directory directly.
+5. **Transfer to your device:** Go to **Transfer** and choose SFTP, USB, or manual. Select which folders to send (ROMs, BIOS, Saves, Config), review the transfer plan, and start. Progress is tracked per-file and overall.
+
+## Home Screen
+
+| Menu Item | Description |
+|---|---|
+| Manage ROMs | Full pipeline: scan, organize, convert disc images to CHD, and generate M3U for multi-disc games |
+| Decompress Files | Extract .zip, .7z, .rar, and .ecm archives |
+| Convert Files | Convert disc images to CHD format |
+| Generate M3U Files | Generate M3U playlists for multi-disc games |
+| Transfer | Send files to your gaming device via SFTP or USB |
+| Archive Redundant Files | Clean up duplicates, superseded disc images, and spent archives |
+| Settings | Configure devices, paths, and options |
+| About ReplayOS | Learn more about ReplayOS and support the project |
 
 ## Configuration
 
@@ -143,7 +160,7 @@ device:
   port: 22
   user: root
   password: replayos
-  rom_path: /roms
+  root_path: /
 
 scraping:
   screenscraper_user: ""
@@ -154,7 +171,7 @@ transfer:
   method: sftp
   sync_mode: true
   usb_path: ""
-  concurrency: 1
+  concurrency: 1  # increase for parallel transfers
 
 aliases:
   # Add custom aliases here, e.g.:
@@ -165,18 +182,24 @@ Use `--config /path/to/config.yaml` to use an alternate config file.
 
 ### Configuration Options
 
-| Option | Description |
-|---|---|
-| `source_dirs` | List of directories containing your ROM subfolders |
-| `chdman_path` | Path to chdman binary (leave empty to auto-detect) |
-| `delete_archive` | Auto-delete `_archive/` directory after organizing |
-| `device.host` | Hostname or IP of your ReplayOS device |
-| `device.port` | SSH port (default: 22) |
-| `device.user` | SSH username (default: root) |
-| `device.password` | SSH password (default: replayos) |
-| `device.rom_path` | ROM directory on the device (default: /roms) |
-| `transfer.sync_mode` | Skip files that already exist on the destination |
-| `transfer.usb_path` | Mount path for USB/SD card transfers |
+| Option | Description | Default |
+|---|---|---|
+| `source_dirs` | List of directories containing your ROM subfolders | (none) |
+| `chdman_path` | Path to chdman binary (leave empty to auto-detect) | auto |
+| `delete_archive` | Auto-delete `_archive/` directory after organizing | false |
+| `device.type` | Device type | replayos |
+| `device.host` | Hostname or IP of your ReplayOS device | replayos.local |
+| `device.port` | SSH port | 22 |
+| `device.user` | SSH username | root |
+| `device.password` | SSH password | replayos |
+| `device.root_path` | Root path on the device | / |
+| `transfer.method` | Transfer method (`sftp` or `usb`) | sftp |
+| `transfer.sync_mode` | Skip files that already exist on the destination | true |
+| `transfer.usb_path` | Mount path for USB/SD card transfers | (none) |
+| `transfer.concurrency` | Number of parallel transfer workers | 1 |
+| `scraping.screenscraper_user` | ScreenScraper API username | (none) |
+| `scraping.screenscraper_pass` | ScreenScraper API password | (none) |
+| `scraping.dat_dirs` | Directories containing No-Intro/Redump DAT files | (none) |
 
 ## Keybindings
 
@@ -185,11 +208,9 @@ Use `--config /path/to/config.yaml` to use an alternate config file.
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `Enter` | Select / confirm |
-| `Esc` | Go back |
+| `Esc` | Go back / cancel transfer |
 | `Space` | Toggle selection |
 | `a` | Select all / deselect all |
-| `s` | Skip current step (extract/convert) |
-| `d` | Delete archive (on results screen) |
 | `Tab` | Next field (in Settings) |
 | `Ctrl+S` | Save (in Settings) |
 | `q` / `Ctrl+C` | Quit (from home screen) |
@@ -198,84 +219,75 @@ Use `--config /path/to/config.yaml` to use an alternate config file.
 
 | Company | Systems |
 |---|---|
-| Atari | 2600, 5200, 7800, Lynx, Jaguar, ST |
-| Bandai | WonderSwan, WonderSwan Color |
-| Coleco | ColecoVision |
-| Commodore | C64, Amiga |
-| GCE | Vectrex |
-| Magnavox/Philips | Odyssey 2, CD-i |
-| Mattel | Intellivision |
-| Microsoft | Xbox |
-| NEC | PC Engine / TG-16, PC Engine CD / TG-CD, SuperGrafx, PC-FX |
-| Nintendo | NES, FDS, SNES, N64, GameCube, Wii, Game Boy, GBC, GBA, DS, Virtual Boy, Pokemon Mini |
+| Amstrad | CPC |
+| Atari | 2600, 5200, 7800, Lynx, Jaguar |
+| Commodore | C64, Amiga, Amiga CD32 |
+| Microsoft | MSX, MSX2 |
+| NEC | PC Engine / TurboGrafx-16, PC Engine CD / TurboGrafx-CD |
+| Nintendo | NES, Famicom Disk System, SNES, N64, Game Boy, Game Boy Color, Game Boy Advance, DS |
 | Panasonic | 3DO |
-| Sega | SG-1000, Master System, Genesis / Mega Drive, 32X, Sega CD / Mega CD, Saturn, Dreamcast, Game Gear |
+| Philips | CD-i |
+| Sega | SG-1000, Master System, Mega Drive / Genesis, 32X, Sega CD / Mega CD, Saturn, Dreamcast, Game Gear |
+| Sharp | X68000 |
+| Sinclair | ZX Spectrum |
 | SNK | Neo Geo, Neo Geo CD, Neo Geo Pocket, Neo Geo Pocket Color |
-| Sony | PlayStation, PS2, PSP |
-| Other | DOS, ScummVM, MSX, MSX2, Arcade |
+| Sony | PlayStation |
+| Arcade | FBNeo, MAME, MAME 2K3+, Naomi / Atomiswave |
+| Other | DOS (DOSBox), ScummVM |
 
 ## Folder Aliases
 
-The scanner recognizes these folder names (case-insensitive). You can also add custom aliases in the config.
+The scanner recognizes these folder names (case-insensitive). ReplayOS folder names (e.g. `nintendo_snes`, `sega_dc`) are also recognized automatically. You can add custom aliases in the config.
 
 <details>
 <summary>Full alias list (click to expand)</summary>
 
 | Alias | System |
 |---|---|
-| `2600`, `atari2600`, `vcs` | Atari 2600 |
-| `5200`, `atari5200` | Atari 5200 |
-| `7800`, `atari7800` | Atari 7800 |
-| `lynx`, `atarilynx` | Atari Lynx |
-| `jaguar`, `atarijaguar` | Atari Jaguar |
-| `atarist` | Atari ST |
-| `wonderswan`, `ws` | WonderSwan |
-| `wonderswancolor`, `wsc` | WonderSwan Color |
-| `colecovision`, `coleco` | ColecoVision |
-| `c64`, `commodore64` | Commodore 64 |
+| `arcade`, `fbneo`, `fba` | Arcade (FBNeo) |
+| `mame` | Arcade (MAME) |
+| `mame2003`, `mame2003plus`, `mame 2003`, `mame2k3p` | Arcade (MAME 2K3+) |
+| `naomi`, `atomiswave` | Arcade (Naomi/Atomiswave) |
+| `amstrad`, `cpc` | Amstrad CPC |
+| `2600`, `atari2600`, `atari 2600`, `vcs` | Atari 2600 |
+| `5200`, `atari5200`, `atari 5200` | Atari 5200 |
+| `7800`, `atari7800`, `atari 7800` | Atari 7800 |
+| `lynx`, `atarilynx`, `atari lynx` | Atari Lynx |
+| `jaguar`, `atarijaguar`, `atari jaguar` | Atari Jaguar |
+| `c64`, `commodore64`, `commodore 64` | Commodore 64 |
 | `amiga` | Amiga |
-| `vectrex` | Vectrex |
-| `odyssey2` | Odyssey 2 |
-| `cdi`, `cd-i` | CD-i |
-| `intellivision`, `intv` | Intellivision |
-| `xbox` | Xbox |
-| `pce`, `pcengine`, `turbografx`, `tg16` | PC Engine / TG-16 |
-| `pcecd`, `pcenginecd`, `turbografxcd`, `tgcd` | PC Engine CD |
-| `supergrafx`, `sgrfx` | SuperGrafx |
-| `pcfx`, `pc-fx` | PC-FX |
+| `amigacd`, `amigacd32`, `amiga cd32`, `cd32` | Amiga CD32 |
+| `msx` | MSX |
+| `msx2` | MSX2 |
+| `pce`, `pcengine`, `pc engine`, `turbografx`, `turbografx16`, `turbografx-16`, `tg16` | PC Engine / TurboGrafx-16 |
+| `pcecd`, `pcenginecd`, `turbografxcd`, `tgcd` | PC Engine CD / TurboGrafx-CD |
 | `nes`, `famicom`, `fc`, `nintendo` | NES |
 | `fds` | Famicom Disk System |
 | `snes`, `supernes`, `superfamicom`, `sfc` | SNES |
-| `n64`, `nintendo64` | Nintendo 64 |
-| `gamecube`, `gc`, `ngc` | GameCube |
-| `wii` | Wii |
-| `gb`, `gameboy` | Game Boy |
-| `gbc`, `gameboycolor` | Game Boy Color |
-| `gba`, `gameboyadvance` | Game Boy Advance |
-| `nds`, `ds`, `nintendods` | Nintendo DS |
-| `virtualboy`, `vb` | Virtual Boy |
-| `pokemini` | Pokemon Mini |
+| `n64`, `nintendo64`, `nintendo 64` | Nintendo 64 |
+| `gb`, `gameboy`, `game boy` | Game Boy |
+| `gbc`, `gameboycolor`, `game boy color` | Game Boy Color |
+| `gba`, `gameboyadvance`, `game boy advance` | Game Boy Advance |
+| `nds`, `ds`, `nintendods`, `nintendo ds` | Nintendo DS |
 | `3do` | 3DO |
+| `cdi`, `cd-i` | CD-i |
 | `sg1000`, `sg-1000` | SG-1000 |
-| `mastersystem`, `sms` | Master System |
-| `megadrive`, `genesis`, `md`, `gen` | Genesis / Mega Drive |
+| `mastersystem`, `master system`, `sms` | Master System |
+| `megadrive`, `mega drive`, `genesis`, `md`, `gen`, `smd` | Mega Drive / Genesis |
 | `32x`, `sega32x` | 32X |
-| `segacd`, `megacd` | Sega CD / Mega CD |
-| `saturn`, `segasaturn` | Saturn |
+| `segacd`, `sega cd`, `megacd`, `mega cd` | Sega CD / Mega CD |
+| `saturn`, `segasaturn`, `sega saturn` | Saturn |
 | `dreamcast`, `dc` | Dreamcast |
-| `gamegear`, `gg` | Game Gear |
-| `neogeo`, `neo-geo` | Neo Geo |
-| `neogeocd` | Neo Geo CD |
+| `gamegear`, `game gear`, `gg` | Game Gear |
+| `x68000`, `x68k` | Sharp X68000 |
+| `zxspectrum`, `zx spectrum`, `spectrum` | ZX Spectrum |
+| `neogeo`, `neo geo`, `neo-geo` | Neo Geo |
+| `neogeocd`, `neo geo cd` | Neo Geo CD |
 | `ngp`, `neopocket` | Neo Geo Pocket |
 | `ngpc`, `neopocketcolor` | Neo Geo Pocket Color |
-| `psx`, `ps1`, `playstation` | PlayStation |
-| `ps2`, `playstation2` | PlayStation 2 |
-| `psp` | PSP |
+| `psx`, `ps1`, `playstation`, `playstation1`, `playstation 1` | PlayStation |
 | `dos`, `dosbox` | DOS |
-| `scummvm` | ScummVM |
-| `msx` | MSX |
-| `msx2` | MSX2 |
-| `arcade`, `mame`, `fbneo`, `fba` | Arcade |
+| `mediaplayer`, `media` | Media Player |
 
 </details>
 
@@ -283,13 +295,24 @@ The scanner recognizes these folder names (case-insensitive). You can also add c
 
 ### SFTP (default)
 
-ReplayOS exposes SSH on port 22 with default credentials `root:replayos`. ROM Wrangler connects and uploads files directly to `/roms/` in the correct folder structure. The SFTP backend is tuned for maximum throughput with large packet sizes and concurrent requests.
+ReplayOS exposes SSH on port 22 with default credentials `root:replayos`. ROM Wrangler connects and uploads files directly in the correct folder structure. The SFTP backend is tuned for maximum throughput with:
+
+- 256KB packet sizes and 64 concurrent requests per file
+- Concurrent writes and reads enabled
+- Buffer pooling to reduce allocations
+- Configurable parallel file transfers (`transfer.concurrency`)
+- Context-aware cancellation (press Esc to stop)
 
 Make sure your Pi is on the network and reachable at `replayos.local` (or set the IP in Settings).
 
 ### USB / SD Card
 
-Set the USB mount path in Settings (e.g., `/media/you/USBDRIVE`), then use the USB transfer option. Files are copied with the same folder structure and progress tracking.
+Set the USB mount path in Settings (e.g., `/media/you/USBDRIVE`), then use the USB transfer option. The USB backend uses:
+
+- 1MB buffer pooling for maximum throughput
+- Linux `fallocate` pre-allocation to reduce fragmentation
+- `fsync` after each file to ensure data is written to disk
+- Parallel transfers and sync mode support
 
 ### Manual
 
@@ -308,19 +331,24 @@ make clean    # Remove build artifacts
 ### Project Structure
 
 ```
-cmd/romwrangler/        Entry point
+cmd/romwrangler/        Entry point, screen factory
 internal/
-  config/               Config loading, system aliases
+  config/               Config loading, system aliases (100+)
   devices/              Device interface (ReplayOS)
-  systems/              System definitions, formats, folder maps
+  systems/              50 system definitions, formats, folder maps
   converter/            chdman wrapper, progress parsing, batch runner
   scraper/              DAT parser, ScreenScraper API, hasher, identifier
   romdb/                SQLite cache for scraping results
   multidisc/            Disc pattern detection, M3U generation
   organizer/            Scanner, renamer, sorter, plan executor,
-                        archive extraction, ECM decompression
-  transfer/             SFTP and USB backends, progress tracking
-  tui/                  Bubbletea app, screens, components
+                        archive extraction, ECM decompression,
+                        BIOS folder setup, redundant file detection
+  transfer/             SFTP and USB backends with context cancellation,
+                        buffer pooling, parallel execution, progress tracking
+  tui/                  Bubbletea app, theme, keys, screen management
+    screens/            Home, manage, decompress, convert, M3U, transfer,
+                        archive, settings, setup, BIOS setup, ReplayOS info
+    components/         Reusable header and status bar components
 ```
 
 ### Running Tests
@@ -329,7 +357,7 @@ internal/
 go test ./...
 ```
 
-Tests cover alias resolution, format validation, folder mapping, chdman progress parsing, DAT parsing, hashing, SQLite cache, multi-disc detection, M3U generation, filename cleaning, scanning, USB transfer, ECM decompression, CUE file repair, and archive extraction.
+Tests cover alias resolution, format validation, folder mapping, chdman progress parsing, DAT parsing, hashing, SQLite cache, multi-disc detection (including revision suffix handling), M3U generation, filename cleaning, scanning, USB transfer with context cancellation, ECM decompression, CUE file repair, and archive extraction.
 
 ## License
 
