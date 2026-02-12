@@ -79,6 +79,7 @@ make run
 2. **Configure source directories:** Navigate to **Settings > General** and enter the paths to your source folder for bios, roms, etc. (example: /home/kurlmarx/Games/replayos)
 
 Should look like this
+
 <img width="525" height="555" alt="Screenshot_20260211_233240" src="https://github.com/user-attachments/assets/37eb7f2f-d143-442b-8ec8-c8897ef25146" />
 
 Press `Ctrl+S` to save.
