@@ -8,9 +8,26 @@ import (
 	"github.com/kurlmarx/romwrangler/internal/tui"
 )
 
+const logo = "KurlMarx Utilities\n" + "" +
+	"▄▄▄▄▄▄▄\n" +
+	"███▀▀███▄\n" +
+	"███▄▄███▀ ▄███▄ ███▄███▄\n" +
+	"███▀▀██▄  ██ ██ ██ ██ ██\n" +
+	"███  ▀███ ▀███▀ ██ ██ ██\n" +
+	"\n" +
+	"▄▄▄▄  ▄▄▄  ▄▄▄▄                        ▄▄\n" +
+	"▀███  ███  ███▀                        ██\n" +
+	" ███  ███  ███ ████▄  ▀▀█▄ ████▄ ▄████ ██ ▄█▀█▄ ████▄\n" +
+	" ███▄▄███▄▄███ ██ ▀▀ ▄█▀██ ██ ██ ██ ██ ██ ██▄█▀ ██ ▀▀\n" +
+	"  ▀████▀████▀  ██    ▀█▄██ ██ ██ ▀████ ██ ▀█▄▄▄ ██\n" +
+	"                                    ██\n" +
+	"                                  ▀▀▀"
+
+const tagline = "                              -FOR USE WITH REPLAYOS-"
+
 type menuItem struct {
-	title string
-	desc  string
+	title  string
+	desc   string
 	screen tui.ScreenID
 }
 
@@ -27,11 +44,14 @@ func NewHomeScreen(cfg *config.Config, width, height int) *HomeScreen {
 		width:  width,
 		height: height,
 		items: []menuItem{
-			{title: "Manage ROMs", desc: "Scan, identify, and organize ROM files", screen: tui.ScreenManage},
+			{title: "Manage ROMs", desc: "Full pipeline: scan, organize, convert, and transfer", screen: tui.ScreenManage},
+			{title: "Decompress Files", desc: "Extract .zip, .7z, .rar, and .ecm archives", screen: tui.ScreenDecompress},
+			{title: "Archive Redundant Files", desc: "Clean up duplicates, superseded disc images, and spent archives", screen: tui.ScreenArchive},
 			{title: "Convert Files", desc: "Convert disc images to CHD format", screen: tui.ScreenConvert},
+			{title: "Generate M3U Files", desc: "Generate M3U playlists for multi-disc games", screen: tui.ScreenM3U},
 			{title: "Transfer", desc: "Send files to your gaming device", screen: tui.ScreenTransfer},
-			{title: "Setup Folders", desc: "Generate system folder structure", screen: tui.ScreenSetup},
 			{title: "Settings", desc: "Configure devices, paths, and options", screen: tui.ScreenSettings},
+			{title: "About ReplayOS", desc: "Learn more about ReplayOS and support the project", screen: tui.ScreenReplayOS},
 		},
 	}
 }
@@ -66,8 +86,9 @@ func (h *HomeScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 }
 
 func (h *HomeScreen) View() string {
-	s := "\n"
-	s += tui.StyleSubtitle.Render("What would you like to do?") + "\n\n"
+	logoStyle := lipgloss.NewStyle().Foreground(tui.ColorGray)
+	s := logoStyle.Render(logo) + "\n"
+	s += tui.StyleDim.Render(tagline) + "\n\n"
 
 	for i, item := range h.items {
 		cursor := "  "
@@ -76,12 +97,11 @@ func (h *HomeScreen) View() string {
 			cursor = tui.StyleMenuCursor.String()
 			titleStyle = tui.StyleSelected
 		}
-
-		title := titleStyle.Render(item.title)
-		desc := tui.StyleDim.Render(item.desc)
-		s += cursor + title + "\n"
-		s += "  " + desc + "\n\n"
+		s += cursor + titleStyle.Render(item.title) + "\n"
 	}
+
+	// Show description of selected item
+	s += "\n" + tui.StyleDim.Render(h.items[h.cursor].desc)
 
 	return lipgloss.NewStyle().Padding(0, 2).Render(s)
 }

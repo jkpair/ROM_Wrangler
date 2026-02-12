@@ -1,91 +1,84 @@
 package systems
 
 // SupportedFormats maps each system to its accepted file extensions.
+// These match the ReplayOS documentation exactly.
 var SupportedFormats = map[SystemID][]string{
+	// Arcade — zip is the native ROM format (no extraction)
+	ArcadeFBNeo:    {".zip"},
+	ArcadeMAME:     {".zip"},
+	ArcadeMAME2K3P: {".zip"},
+	ArcadeDC:       {".zip"},
+
+	// Amstrad
+	AmstradCPC: {".dsk", ".sna", ".tap", ".cdt", ".voc", ".cpr", ".m3u"},
+
 	// Atari
-	Atari2600:   {".a26", ".bin", ".rom", ".zip", ".7z"},
-	Atari5200:   {".a52", ".bin", ".rom", ".zip", ".7z"},
-	Atari7800:   {".a78", ".bin", ".rom", ".zip", ".7z"},
-	AtariLynx:   {".lnx", ".o", ".zip", ".7z"},
-	AtariJaguar: {".j64", ".jag", ".rom", ".zip", ".7z"},
-	AtariST:     {".st", ".stx", ".msa", ".dim", ".zip", ".7z"},
-
-	// Bandai
-	BandaiWS:  {".ws", ".zip", ".7z"},
-	BandaiWSC: {".wsc", ".ws", ".zip", ".7z"},
-
-	// Coleco
-	ColecoVision: {".col", ".rom", ".bin", ".zip", ".7z"},
+	Atari2600:   {".a26", ".bin"},
+	Atari5200:   {".a52", ".bin"},
+	Atari7800:   {".a78", ".bin", ".cdf"},
+	AtariJaguar: {".j64", ".jag"},
+	AtariLynx:   {".lnx"},
 
 	// Commodore
-	CommodoreC64:   {".d64", ".t64", ".tap", ".prg", ".crt", ".zip", ".7z"},
-	CommodoreAmiga: {".adf", ".adz", ".dms", ".hdf", ".hdz", ".lha", ".zip", ".7z"},
-
-	// GCE
-	GCEVectrex: {".vec", ".gam", ".bin", ".zip", ".7z"},
-
-	// Magnavox / Philips
-	MagnavoxOdyssey2: {".o2", ".bin", ".zip", ".7z"},
-	PhilipsCDi:       {".chd", ".cue", ".bin", ".iso"},
-
-	// Mattel
-	MattelIntv: {".int", ".bin", ".rom", ".zip", ".7z"},
+	CommodoreC64:     {".d64", ".d71", ".d80", ".d81", ".d82", ".g64", ".g41", ".x64", ".t64", ".tap", ".prg", ".p00", ".crt", ".bin", ".gz", ".m3u"},
+	CommodoreAmiga:   {".adf", ".adz", ".dms", ".fdi", ".raw", ".hdf", ".hdz", ".lha", ".slave", ".info", ".uae", ".m3u"},
+	CommodoreAmigaCD: {".cue", ".ccd", ".nrg", ".mds", ".iso", ".chd", ".m3u"},
 
 	// Microsoft
-	MicrosoftXbox: {".iso", ".chd"},
+	MSX:  {".rom", ".ri", ".mx1", ".mx2", ".dsk", ".col", ".sg", ".sc", ".sf", ".cas", ".m3u"},
+	MSX2: {".rom", ".ri", ".mx1", ".mx2", ".dsk", ".col", ".sg", ".sc", ".sf", ".cas", ".m3u"},
 
 	// NEC
-	NECPCE:   {".pce", ".sgx", ".zip", ".7z"},
-	NECPCECD: {".chd", ".cue", ".bin", ".iso"},
-	NECSGRFX: {".pce", ".sgx", ".zip", ".7z"},
-	NECPCFX:  {".chd", ".cue", ".bin", ".iso"},
+	NECPCE:   {".pce", ".sgx", ".toc"},
+	NECPCECD: {".cue", ".ccd", ".chd", ".m3u"},
 
 	// Nintendo
-	NintendoNES:      {".nes", ".unf", ".unif", ".fds", ".zip", ".7z"},
-	NintendoFDS:      {".fds", ".zip", ".7z"},
-	NintendoSNES:     {".sfc", ".smc", ".zip", ".7z"},
-	NintendoN64:      {".n64", ".z64", ".v64", ".zip", ".7z"},
-	NintendoGC:       {".iso", ".gcm", ".chd", ".rvz", ".ciso"},
-	NintendoWii:      {".iso", ".wbfs", ".chd", ".rvz", ".ciso"},
-	NintendoGB:       {".gb", ".zip", ".7z"},
-	NintendoGBC:      {".gbc", ".gb", ".zip", ".7z"},
-	NintendoGBA:      {".gba", ".zip", ".7z"},
-	NintendoNDS:      {".nds", ".zip", ".7z"},
-	NintendoVB:       {".vb", ".vboy", ".zip", ".7z"},
-	NintendoPokeMini: {".min", ".zip", ".7z"},
+	NintendoNES:  {".fds", ".nes", ".unf", ".unif"},
+	NintendoFDS:  {".fds", ".nes", ".unf", ".unif"},
+	NintendoSNES: {".smc", ".sfc", ".swc", ".fig", ".bs", ".st"},
+	NintendoN64:  {".n64", ".v64", ".z64", ".bin", ".u1"},
+	NintendoGB:   {".gb", ".sgb"},
+	NintendoGBC:  {".gbc", ".sgbc"},
+	NintendoGBA:  {".gba"},
+	NintendoNDS:  {".nds"},
 
 	// Panasonic
-	Panasonic3DO: {".chd", ".cue", ".bin", ".iso"},
+	Panasonic3DO: {".iso", ".chd", ".cue"},
+
+	// Philips
+	PhilipsCDi: {".iso", ".chd", ".cue"},
 
 	// Sega
-	SegaSG1000: {".sg", ".bin", ".zip", ".7z"},
-	SegaMS:     {".sms", ".bin", ".zip", ".7z"},
-	SegaMD:     {".md", ".bin", ".gen", ".smd", ".zip", ".7z"},
-	Sega32X:    {".32x", ".bin", ".zip", ".7z"},
-	SegaCD:     {".chd", ".cue", ".bin", ".iso"},
-	SegaSaturn: {".chd", ".cue", ".bin", ".iso"},
-	SegaDC:     {".chd", ".gdi", ".cue", ".bin", ".cdi"},
-	SegaGG:     {".gg", ".bin", ".zip", ".7z"},
+	SegaSG1000: {".sg"},
+	SegaGG:     {".gg"},
+	SegaMS:     {".sms"},
+	SegaMD:     {".md", ".smd", ".gen", ".bin"},
+	SegaCD:     {".m3u", ".cue", ".iso", ".chd"},
+	Sega32X:    {".32x"},
+	SegaSaturn: {".cue", ".ccd", ".chd", ".toc", ".m3u"},
+	SegaDC:     {".chd", ".cdi", ".elf", ".cue", ".gdi", ".lst", ".dat", ".m3u"},
 
-	// SNK
-	SNKNeoGeo:   {".zip", ".7z"},
-	SNKNeoGeoCD: {".chd", ".cue", ".bin", ".iso"},
-	SNKNGP:      {".ngp", ".zip", ".7z"},
-	SNKNGPC:     {".ngc", ".ngpc", ".zip", ".7z"},
+	// Sharp
+	SharpX68K: {".dim", ".img", ".d88", ".88d", ".hdm", ".dup", ".2hd", ".xdf", ".hdf", ".cmd", ".m3u"},
+
+	// Sinclair
+	SinclairZX: {".tzx", ".tap", ".z80", ".rzx", ".scl", ".trd", ".dsk", ".dck", ".sna", ".szx"},
+
+	// SNK — zip is the native ROM format for Neo Geo
+	SNKNeoGeo:   {".zip"},
+	SNKNeoGeoCD: {".cue", ".chd"},
+	SNKNGP:      {".ngp", ".ngc", ".ngpc", ".npc"},
+	SNKNGPC:     {".ngp", ".ngc", ".ngpc", ".npc"},
 
 	// Sony
-	SonyPSX: {".chd", ".cue", ".bin", ".iso", ".pbp", ".img", ".mdf", ".ecm"},
-	SonyPS2: {".chd", ".iso", ".bin", ".cue", ".gz"},
-	SonyPSP: {".iso", ".cso", ".pbp"},
+	SonyPSX: {".exe", ".psexe", ".cue", ".img", ".iso", ".chd", ".pbp", ".mds", ".psf", ".m3u"},
 
-	// Misc
-	DOSBox:  {".zip", ".7z", ".exe", ".com", ".bat", ".conf"},
-	ScummVM: {".zip", ".7z"},
-	MSX:     {".rom", ".mx1", ".mx2", ".dsk", ".cas", ".zip", ".7z"},
-	MSX2:    {".rom", ".mx1", ".mx2", ".dsk", ".cas", ".zip", ".7z"},
+	// PC — zip is a native format for DOS
+	DOSBox:  {".zip", ".dosz", ".exe", ".com", ".bat", ".iso", ".cue", ".img", ".m3u", ".m3u8"},
+	ScummVM: {".scummvm", ".svm"},
 
-	// Arcade
-	Arcade: {".zip", ".7z"},
+	// Media
+	MediaPlayer: {".mkv", ".avi", ".f4v", ".mp4", ".mp3", ".flac", ".ogg", ".wav"},
 }
 
 // IsValidFormat checks if a file extension is supported for a system.

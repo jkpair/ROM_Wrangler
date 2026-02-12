@@ -35,7 +35,8 @@ func TestIsValidFormat(t *testing.T) {
 		{SegaDC, ".gdi", true},
 		{SegaDC, ".nes", false},
 		{NintendoNES, ".nes", true},
-		{NintendoNES, ".zip", true},
+		{NintendoNES, ".zip", false},
+		{ArcadeFBNeo, ".zip", true},
 		{SonyPSX, ".chd", true},
 		{SonyPSX, ".gba", false},
 	}

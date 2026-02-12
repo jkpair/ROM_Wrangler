@@ -27,6 +27,10 @@ func main() {
 			return screens.NewHomeScreen(cfg, width, height)
 		case tui.ScreenManage:
 			return screens.NewManageScreen(cfg, width, height)
+		case tui.ScreenDecompress:
+			return screens.NewDecompressScreen(cfg, width, height)
+		case tui.ScreenArchive:
+			return screens.NewArchiveScreen(cfg, width, height)
 		case tui.ScreenConvert:
 			return screens.NewConvertScreen(cfg, width, height)
 		case tui.ScreenTransfer:
@@ -35,6 +39,12 @@ func main() {
 			return screens.NewSettingsScreen(cfg, width, height)
 		case tui.ScreenSetup:
 			return screens.NewSetupScreen(cfg, width, height)
+		case tui.ScreenReplayOS:
+			return screens.NewReplayOSScreen(width, height)
+		case tui.ScreenBIOS:
+			return screens.NewBIOSSetupScreen(cfg, width, height)
+		case tui.ScreenM3U:
+			return screens.NewM3UScreen(cfg, width, height)
 		default:
 			return screens.NewHomeScreen(cfg, width, height)
 		}

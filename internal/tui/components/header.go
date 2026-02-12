@@ -36,6 +36,6 @@ func (h Header) View() string {
 		Width(h.Width).
 		BorderBottom(true).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(tui.ColorDimGray).
+		BorderForeground(tui.ColorBorderDim).
 		Render(title + crumb)
 }

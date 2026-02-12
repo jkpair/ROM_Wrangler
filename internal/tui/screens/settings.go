@@ -44,7 +44,7 @@ type SettingsScreen struct {
 	saveErr       error
 }
 
-var mainMenuItems = []string{"General", "Transfer"}
+var mainMenuItems = []string{"General", "Transfer", "Setup ROM Folders", "Setup BIOS Folders"}
 var transferMenuItems = []string{"SFTP Settings", "USB Settings", "Concurrency"}
 
 func NewSettingsScreen(cfg *config.Config, width, height int) *SettingsScreen {
@@ -114,6 +114,14 @@ func (s *SettingsScreen) updateMenu(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 			s.section = sectionTransfer
 			s.menuItems = transferMenuItems
 			s.menuCursor = 0
+		case 2:
+			return s, func() tea.Msg {
+				return tui.NavigateMsg{Screen: tui.ScreenSetup}
+			}
+		case 3:
+			return s, func() tea.Msg {
+				return tui.NavigateMsg{Screen: tui.ScreenBIOS}
+			}
 		}
 	}
 	return s, nil
@@ -200,7 +208,7 @@ func (s *SettingsScreen) updateFields(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 
 func (s *SettingsScreen) buildGeneralFields() {
 	s.fields = []settingsField{
-		s.makeField("Source Directories", strings.Join(s.cfg.SourceDirs, ", ")),
+		s.makeField("Root Directory", strings.Join(s.cfg.SourceDirs, ", ")),
 		s.makeField("chdman Path", s.cfg.ChdmanPath),
 		s.makeField("Auto-delete Archive", fmt.Sprintf("%v", s.cfg.DeleteArchive)),
 	}
@@ -212,7 +220,7 @@ func (s *SettingsScreen) buildSFTPFields() {
 		s.makeField("Port", fmt.Sprintf("%d", s.cfg.Device.Port)),
 		s.makeField("User", s.cfg.Device.User),
 		s.makeField("Password", s.cfg.Device.Password),
-		s.makeField("ROM Path", s.cfg.Device.ROMPath),
+		s.makeField("Root Path", s.cfg.Device.RootPath),
 	}
 	s.fields[3].input.EchoMode = textinput.EchoPassword
 }
@@ -257,7 +265,7 @@ func (s *SettingsScreen) applyFields() {
 		fmt.Sscanf(s.fields[1].input.Value(), "%d", &s.cfg.Device.Port)
 		s.cfg.Device.User = s.fields[2].input.Value()
 		s.cfg.Device.Password = s.fields[3].input.Value()
-		s.cfg.Device.ROMPath = s.fields[4].input.Value()
+		s.cfg.Device.RootPath = s.fields[4].input.Value()
 
 	case sectionUSB:
 		s.cfg.Transfer.USBPath = s.fields[0].input.Value()

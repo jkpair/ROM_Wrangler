@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,7 +78,7 @@ type ssSynopsis struct {
 }
 
 // Identify tries to identify a ROM by its hashes via the ScreenScraper API.
-func (c *ScreenScraperClient) Identify(hashes FileHashes, systemID systems.SystemID) (*GameInfo, error) {
+func (c *ScreenScraperClient) Identify(ctx context.Context, hashes FileHashes, systemID systems.SystemID) (*GameInfo, error) {
 	c.rateLimit()
 
 	params := url.Values{}
@@ -103,7 +104,12 @@ func (c *ScreenScraperClient) Identify(hashes FileHashes, systemID systems.Syste
 	params.Set("romtaille", fmt.Sprintf("%d", hashes.Size))
 
 	reqURL := screenScraperBaseURL + "/jeuInfos.php?" + params.Encode()
-	resp, err := c.client.Get(reqURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("screenscraper request failed: %w", err)
 	}

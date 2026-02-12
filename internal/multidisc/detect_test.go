@@ -143,6 +143,48 @@ func TestHasDiscPattern(t *testing.T) {
 	}
 }
 
+func TestDetectSets_RevisionSuffix(t *testing.T) {
+	// Disc pattern between region and revision tags should not leave double spaces
+	files := []string{
+		"/roms/Final Fantasy IX (USA) (Disc 1) (Rev 1).chd",
+		"/roms/Final Fantasy IX (USA) (Disc 2) (Rev 1).chd",
+		"/roms/Final Fantasy IX (USA) (Disc 3) (Rev 1).chd",
+		"/roms/Final Fantasy IX (USA) (Disc 4) (Rev 1).chd",
+	}
+
+	sets, standalone := DetectSets(files)
+	if len(standalone) != 0 {
+		t.Errorf("expected 0 standalone, got %d", len(standalone))
+	}
+	if len(sets) != 1 {
+		t.Fatalf("expected 1 set, got %d", len(sets))
+	}
+	if sets[0].BaseName != "Final Fantasy IX (USA) (Rev 1)" {
+		t.Errorf("BaseName = %q, want %q", sets[0].BaseName, "Final Fantasy IX (USA) (Rev 1)")
+	}
+	if len(sets[0].Files) != 4 {
+		t.Errorf("expected 4 discs, got %d", len(sets[0].Files))
+	}
+}
+
+func TestStripDiscPattern_NoDoubleSpaces(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"Game (USA) (Disc 1) (Rev 1)", "Game (USA) (Rev 1)"},
+		{"Game (USA) (Disc 2)", "Game (USA)"},
+		{"Game (Disc 1 of 2) (Rev 1)", "Game (Rev 1)"},
+		{"Metal Gear Solid (USA) (Disc 1) (Rev 1)", "Metal Gear Solid (USA) (Rev 1)"},
+	}
+	for _, tt := range tests {
+		result := StripDiscPattern(tt.input)
+		if result != tt.expected {
+			t.Errorf("StripDiscPattern(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
 func TestGenerateM3U(t *testing.T) {
 	set := MultiDiscSet{
 		BaseName: "Final Fantasy VII (USA)",

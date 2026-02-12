@@ -157,7 +157,7 @@ func (m *ManageScreen) Init() tea.Cmd {
 
 func (m *ManageScreen) startScan() tea.Cmd {
 	m.phase = managePhaseScan
-	dirs := m.cfg.SourceDirs
+	dirs := m.cfg.ROMDirs()
 	aliases := m.cfg.Aliases
 	chdmanCfg := m.cfg.ChdmanPath
 	return func() tea.Msg {
@@ -248,7 +248,7 @@ func (m *ManageScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		m.phase = managePhaseResults
 		// Auto-delete archive if configured
 		if m.cfg.DeleteArchive && len(m.cfg.SourceDirs) > 0 {
-			archiveDir := filepath.Join(m.cfg.SourceDirs[0], "_archive")
+			archiveDir := filepath.Join(m.cfg.ROMDirs()[0], "_archive")
 			return m, func() tea.Msg {
 				err := organizer.DeleteArchiveDir(archiveDir)
 				return deleteArchiveDoneMsg{err: err}
@@ -377,7 +377,7 @@ func (m *ManageScreen) updateResults(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 		return m, func() tea.Msg { return tui.NavigateBackMsg{} }
 	case msg.String() == "d":
 		if !m.archiveDeleted && len(m.cfg.SourceDirs) > 0 {
-			archiveDir := filepath.Join(m.cfg.SourceDirs[0], "_archive")
+			archiveDir := filepath.Join(m.cfg.ROMDirs()[0], "_archive")
 			return m, func() tea.Msg {
 				err := organizer.DeleteArchiveDir(archiveDir)
 				return deleteArchiveDoneMsg{err: err}
@@ -390,7 +390,7 @@ func (m *ManageScreen) updateResults(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 func (m *ManageScreen) goToPlan() {
 	dev := devices.NewReplayOS()
 	if len(m.cfg.SourceDirs) > 0 {
-		m.outputDir = m.cfg.SourceDirs[0]
+		m.outputDir = m.cfg.ROMDirs()[0]
 	} else {
 		m.outputDir = "."
 	}
@@ -399,7 +399,7 @@ func (m *ManageScreen) goToPlan() {
 }
 
 func (m *ManageScreen) startExtraction() tea.Cmd {
-	dirs := m.cfg.SourceDirs
+	dirs := m.cfg.ROMDirs()
 	aliases := m.cfg.Aliases
 
 	progressCh := make(chan extractProgressMsg, 100)
@@ -428,7 +428,7 @@ func (m *ManageScreen) startExtraction() tea.Cmd {
 }
 
 func (m *ManageScreen) startReScan() tea.Cmd {
-	dirs := m.cfg.SourceDirs
+	dirs := m.cfg.ROMDirs()
 	aliases := m.cfg.Aliases
 	chdmanCfg := m.cfg.ChdmanPath
 	return func() tea.Msg {
@@ -478,7 +478,7 @@ func (m *ManageScreen) startArchiveAll() tea.Cmd {
 	convertResults := m.convertResults
 	extractProcessed := m.extractProcessed
 	dedupFiltered := m.dedupFiltered
-	sourceRoots := m.cfg.SourceDirs
+	sourceRoots := m.cfg.ROMDirs()
 	archiveDir := filepath.Join(sourceRoots[0], "_archive")
 
 	return func() tea.Msg {
@@ -630,8 +630,8 @@ func (m *ManageScreen) viewScan() string {
 	s := tui.StyleSubtitle.Render("Manage ROMs") + "\n\n"
 
 	if len(m.cfg.SourceDirs) == 0 {
-		s += tui.StyleWarning.Render("No source directories configured.") + "\n\n"
-		s += tui.StyleDim.Render("Go to Settings to add source directories.")
+		s += tui.StyleWarning.Render("No root directory configured.") + "\n\n"
+		s += tui.StyleDim.Render("Go to Settings to set a root directory.")
 		return lipgloss.NewStyle().Padding(1, 2).Render(s)
 	}
 
@@ -789,7 +789,7 @@ func (m *ManageScreen) viewConvertPreview() string {
 		s += fmt.Sprintf("  %s: %d files\n", info.DisplayName, bySystem[sysID])
 	}
 
-	archiveDir := filepath.Join(m.cfg.SourceDirs[0], "_archive")
+	archiveDir := filepath.Join(m.cfg.ROMDirs()[0], "_archive")
 	s += fmt.Sprintf("\nOriginals will be archived to:\n  %s\n", tui.StyleDim.Render(archiveDir))
 
 	s += "\n" + tui.StyleDim.Render("enter: convert  s: skip  esc: back")

@@ -1,15 +1,21 @@
 package transfer
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
+
+// sftpBufSize is the buffer size for SFTP uploads (256KB).
+const sftpBufSize = 256 * 1024
 
 // SFTPBackend implements TransferBackend over SFTP.
 type SFTPBackend struct {
@@ -20,6 +26,7 @@ type SFTPBackend struct {
 
 	sshClient  *ssh.Client
 	sftpClient *sftp.Client
+	bufferPool sync.Pool
 }
 
 func NewSFTPBackend(host string, port int, user, password string) *SFTPBackend {
@@ -28,10 +35,16 @@ func NewSFTPBackend(host string, port int, user, password string) *SFTPBackend {
 		Port:     port,
 		User:     user,
 		Password: password,
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				b := make([]byte, sftpBufSize)
+				return &b
+			},
+		},
 	}
 }
 
-func (s *SFTPBackend) Connect() error {
+func (s *SFTPBackend) Connect(ctx context.Context) error {
 	config := &ssh.ClientConfig{
 		User: s.User,
 		Auth: []ssh.AuthMethod{
@@ -41,20 +54,31 @@ func (s *SFTPBackend) Connect() error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", s.Host, s.Port)
-	sshClient, err := ssh.Dial("tcp", addr, config)
+
+	// Dial with context cancellation support
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}
-	s.sshClient = sshClient
 
-	// Use larger max packet size (256KB) and more concurrent requests
-	// to maximize throughput over the network.
-	sftpClient, err := sftp.NewClient(sshClient,
+	// Perform SSH handshake on the raw connection
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("SSH handshake failed: %w", err)
+	}
+	s.sshClient = ssh.NewClient(sshConn, chans, reqs)
+
+	// Enable concurrent writes/reads for better throughput
+	sftpClient, err := sftp.NewClient(s.sshClient,
 		sftp.MaxPacketUnchecked(256*1024),
 		sftp.MaxConcurrentRequestsPerFile(64),
+		sftp.UseConcurrentWrites(true),
+		sftp.UseConcurrentReads(true),
 	)
 	if err != nil {
-		sshClient.Close()
+		s.sshClient.Close()
 		return fmt.Errorf("SFTP session failed: %w", err)
 	}
 	s.sftpClient = sftpClient
@@ -94,11 +118,14 @@ func (s *SFTPBackend) FileExists(remotePath string, expectedSize int64) (bool, e
 	return info.Size() == expectedSize, nil
 }
 
-// uploadBufSize is the buffer size for file uploads (256KB).
-// Larger buffers reduce syscall overhead and improve throughput.
-const uploadBufSize = 256 * 1024
+func (s *SFTPBackend) Upload(ctx context.Context, localPath, remotePath string, progressFn func(written int64)) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
 
-func (s *SFTPBackend) Upload(localPath, remotePath string, progressFn func(written int64)) error {
 	localFile, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("open local file: %w", err)
@@ -118,9 +145,11 @@ func (s *SFTPBackend) Upload(localPath, remotePath string, progressFn func(writt
 		writer = pw
 	}
 
-	// Use a large buffer for copying to reduce syscalls
-	buf := make([]byte, uploadBufSize)
-	if _, err := io.CopyBuffer(writer, localFile, buf); err != nil {
+	// Get buffer from pool
+	bufp := s.bufferPool.Get().(*[]byte)
+	defer s.bufferPool.Put(bufp)
+
+	if _, err := io.CopyBuffer(writer, localFile, *bufp); err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
 

@@ -1,22 +1,43 @@
 package transfer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+// usbBufSize is the buffer size for USB uploads (1MB).
+// USB benefits from larger blocks than network transfers.
+const usbBufSize = 1024 * 1024
 
 // USBBackend implements TransferBackend for local USB/SD card copy.
 type USBBackend struct {
-	MountPath string
+	MountPath  string
+	bufferPool sync.Pool
 }
 
 func NewUSBBackend(mountPath string) *USBBackend {
-	return &USBBackend{MountPath: mountPath}
+	return &USBBackend{
+		MountPath: mountPath,
+		bufferPool: sync.Pool{
+			New: func() interface{} {
+				b := make([]byte, usbBufSize)
+				return &b
+			},
+		},
+	}
 }
 
-func (u *USBBackend) Connect() error {
+func (u *USBBackend) Connect(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	info, err := os.Stat(u.MountPath)
 	if err != nil {
 		return fmt.Errorf("USB path not found: %w", err)
@@ -45,7 +66,14 @@ func (u *USBBackend) FileExists(path string, expectedSize int64) (bool, error) {
 	return info.Size() == expectedSize, nil
 }
 
-func (u *USBBackend) Upload(localPath, remotePath string, progressFn func(written int64)) error {
+func (u *USBBackend) Upload(ctx context.Context, localPath, remotePath string, progressFn func(written int64)) error {
+	// Check context before starting
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	destPath := filepath.Join(u.MountPath, remotePath)
 
 	destDir := filepath.Dir(destPath)
@@ -59,11 +87,21 @@ func (u *USBBackend) Upload(localPath, remotePath string, progressFn func(writte
 	}
 	defer src.Close()
 
+	srcInfo, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+
 	dst, err := os.Create(destPath)
 	if err != nil {
 		return fmt.Errorf("create dest: %w", err)
 	}
 	defer dst.Close()
+
+	// Pre-allocate space on destination for large files
+	if srcInfo.Size() > 0 {
+		preallocate(dst, srcInfo.Size()) // best-effort, ignore error
+	}
 
 	var writer io.Writer = dst
 	var pw *ProgressWriter
@@ -72,7 +110,11 @@ func (u *USBBackend) Upload(localPath, remotePath string, progressFn func(writte
 		writer = pw
 	}
 
-	if _, err := io.Copy(writer, src); err != nil {
+	// Get buffer from pool (1MB for USB throughput)
+	bufp := u.bufferPool.Get().(*[]byte)
+	defer u.bufferPool.Put(bufp)
+
+	if _, err := io.CopyBuffer(writer, src, *bufp); err != nil {
 		return fmt.Errorf("copy failed: %w", err)
 	}
 

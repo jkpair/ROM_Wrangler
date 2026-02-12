@@ -52,7 +52,13 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 				if !ok {
 					// Walk dir but mark files as unresolved
 					filepath.Walk(subPath, func(path string, info os.FileInfo, err error) error {
-						if err != nil || info.IsDir() {
+						if err != nil {
+							return nil
+						}
+						if info.IsDir() && info.Name() == "_archive" {
+							return filepath.SkipDir
+						}
+						if info.IsDir() {
 							return nil
 						}
 						result.Unresolved = append(result.Unresolved, path)
@@ -63,7 +69,13 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 
 				// Walk the system directory
 				filepath.Walk(subPath, func(path string, info os.FileInfo, err error) error {
-					if err != nil || info.IsDir() {
+					if err != nil {
+						return nil
+					}
+					if info.IsDir() && info.Name() == "_archive" {
+						return filepath.SkipDir
+					}
+					if info.IsDir() {
 						return nil
 					}
 

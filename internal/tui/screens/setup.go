@@ -30,6 +30,7 @@ type SetupScreen struct {
 	width, height int
 	phase         setupPhase
 
+	rootDir  string
 	baseDir  string
 	statuses []organizer.FolderStatus
 
@@ -49,7 +50,8 @@ func NewSetupScreen(cfg *config.Config, width, height int) *SetupScreen {
 	}
 
 	if len(cfg.SourceDirs) > 0 {
-		s.baseDir = cfg.SourceDirs[0]
+		s.rootDir = cfg.SourceDirs[0]
+		s.baseDir = cfg.ROMDirs()[0]
 	}
 
 	return s
@@ -119,8 +121,14 @@ func (s *SetupScreen) updateConfirm(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 		s.phase = setupPhaseOverview
 	case key.Matches(msg, tui.Keys.Enter):
 		baseDir := s.baseDir
+		rootDir := s.rootDir
 		return s, func() tea.Msg {
+			// Create root device structure (bios, captures, config, roms, saves)
+			rootCreated, rootErrs := organizer.GenerateRootDeviceFolders(rootDir)
+			// Create ROM system folders
 			created, errs := organizer.GenerateAllFolders(baseDir)
+			created += rootCreated
+			errs = append(errs, rootErrs...)
 			return setupDoneMsg{created: created, errs: errs}
 		}
 	}
@@ -130,8 +138,8 @@ func (s *SetupScreen) updateConfirm(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 func (s *SetupScreen) View() string {
 	if s.baseDir == "" {
 		content := tui.StyleSubtitle.Render("Setup Folders") + "\n\n"
-		content += tui.StyleWarning.Render("No source directory configured.") + "\n\n"
-		content += tui.StyleDim.Render("Go to Settings and set a source directory first.")
+		content += tui.StyleWarning.Render("No root directory configured.") + "\n\n"
+		content += tui.StyleDim.Render("Go to Settings and set a root directory first.")
 		content += "\n\n" + tui.StyleDim.Render("esc: back")
 		return lipgloss.NewStyle().Padding(1, 2).Render(content)
 	}
@@ -228,6 +236,8 @@ func (s *SetupScreen) viewConfirm() string {
 	content := tui.StyleSubtitle.Render("Create Folders?") + "\n\n"
 	content += fmt.Sprintf("This will create %d system folders in:\n", missing)
 	content += tui.StyleNormal.Render(s.baseDir) + "\n\n"
+	content += "Root device structure (bios, captures, config, roms, saves) in:\n"
+	content += tui.StyleNormal.Render(s.rootDir) + "\n\n"
 	content += tui.StyleDim.Render("enter: yes, create them  esc: cancel")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(content)

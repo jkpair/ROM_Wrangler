@@ -1,6 +1,9 @@
 package multidisc
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // discPatterns are regexes that match disc number indicators in filenames.
 // Each has a named capture group "num" for the disc number.
@@ -28,9 +31,13 @@ func HasDiscPattern(filename string) bool {
 func StripDiscPattern(filename string) string {
 	result := filename
 	for _, p := range discPatterns {
-		result = p.ReplaceAllString(result, "")
+		result = p.ReplaceAllString(result, " ")
 	}
-	return result
+	// Collapse runs of whitespace left behind by pattern removal
+	for strings.Contains(result, "  ") {
+		result = strings.ReplaceAll(result, "  ", " ")
+	}
+	return strings.TrimSpace(result)
 }
 
 // ExtractDiscNumber returns the disc number from a filename, or 0 if not found.

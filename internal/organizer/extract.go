@@ -83,11 +83,17 @@ func FindExtractable(dirs []string, aliases map[string]string) []ExtractableFile
 
 			subPath := filepath.Join(dir, entry.Name())
 			filepath.Walk(subPath, func(path string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
+				if err != nil {
+					return nil
+				}
+				if fi.IsDir() && fi.Name() == "_archive" {
+					return filepath.SkipDir
+				}
+				if fi.IsDir() {
 					return nil
 				}
 				ext := strings.ToLower(filepath.Ext(path))
-				if archiveExtensions[ext] {
+				if archiveExtensions[ext] && !systems.IsValidFormat(systemID, ext) {
 					result = append(result, ExtractableFile{
 						Path:   path,
 						System: systemID,

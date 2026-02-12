@@ -1,7 +1,11 @@
 package screens
 
 import (
+	"context"
 	"fmt"
+	"path"
+	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +19,7 @@ type transferPhase int
 
 const (
 	transferPhaseMethod transferPhase = iota
+	transferPhaseFolders
 	transferPhaseConnect
 	transferPhasePlan
 	transferPhaseProgress
@@ -38,6 +43,12 @@ type transferDoneMsg struct {
 	err error
 }
 
+type transferFolder struct {
+	label    string // "ROMs", "BIOS", "Saves", "Config"
+	dirName  string // "roms", "bios", "saves", "config"
+	selected bool
+}
+
 type TransferScreen struct {
 	cfg           *config.Config
 	width, height int
@@ -47,17 +58,25 @@ type TransferScreen struct {
 	methods []string
 	cursor  int
 
+	// Folder selection
+	folderOptions []transferFolder
+	folderCursor  int
+
 	// Connection
 	backend    transfer.TransferBackend
 	connectErr error
 
 	// Plan
-	plan    *transfer.TransferPlan
-	planErr error
+	plan             *transfer.TransferPlan
+	planErr          error
+	planFolderLabels []string // folder labels included in the plan
 
 	// Progress
 	progressCh      <-chan transfer.TransferProgress
 	currentProgress transfer.TransferProgress
+
+	// Cancellation
+	cancel context.CancelFunc
 
 	// Results
 	filesTransferred int
@@ -108,14 +127,24 @@ func (t *TransferScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 
 	case transferDoneMsg:
 		t.totalErr = msg.err
+		t.cancel = nil
 		t.phase = transferPhaseResults
 
 	case tea.KeyMsg:
 		switch t.phase {
 		case transferPhaseMethod:
 			return t.updateMethod(msg)
+		case transferPhaseFolders:
+			return t.updateFolders(msg)
 		case transferPhasePlan:
 			return t.updatePlan(msg)
+		case transferPhaseProgress:
+			// Allow cancellation during progress
+			if key.Matches(msg, tui.Keys.Back) {
+				if t.cancel != nil {
+					t.cancel()
+				}
+			}
 		case transferPhaseResults:
 			if key.Matches(msg, tui.Keys.Back) || key.Matches(msg, tui.Keys.Enter) {
 				if t.backend != nil {
@@ -156,12 +185,12 @@ func (t *TransferScreen) updateMethod(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 				t.cfg.Device.User,
 				t.cfg.Device.Password,
 			)
-			t.phase = transferPhaseConnect
-			return t, t.connect()
+			t.initFolderSelection()
+			t.phase = transferPhaseFolders
 		case 1: // USB
 			t.backend = transfer.NewUSBBackend(t.cfg.Transfer.USBPath)
-			t.phase = transferPhaseConnect
-			return t, t.connect()
+			t.initFolderSelection()
+			t.phase = transferPhaseFolders
 		case 2: // Manual
 			// Stay on this screen showing instructions
 		}
@@ -185,10 +214,69 @@ func (t *TransferScreen) updatePlan(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 	return t, nil
 }
 
+func (t *TransferScreen) initFolderSelection() {
+	t.folderOptions = []transferFolder{
+		{label: "ROMs", dirName: "roms", selected: true},
+		{label: "BIOS", dirName: "bios", selected: false},
+		{label: "Saves", dirName: "saves", selected: false},
+		{label: "Config", dirName: "config", selected: false},
+	}
+	t.folderCursor = 0
+}
+
+func (t *TransferScreen) updateFolders(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, tui.Keys.Back):
+		if t.backend != nil {
+			t.backend.Close()
+			t.backend = nil
+		}
+		t.phase = transferPhaseMethod
+	case key.Matches(msg, tui.Keys.Up):
+		if t.folderCursor > 0 {
+			t.folderCursor--
+		}
+	case key.Matches(msg, tui.Keys.Down):
+		if t.folderCursor < len(t.folderOptions)-1 {
+			t.folderCursor++
+		}
+	case msg.Type == tea.KeySpace:
+		t.folderOptions[t.folderCursor].selected = !t.folderOptions[t.folderCursor].selected
+	case key.Matches(msg, tui.Keys.Enter):
+		// Require at least one selection
+		if len(t.selectedFolders()) > 0 {
+			t.phase = transferPhaseConnect
+			return t, t.connect()
+		}
+	}
+	return t, nil
+}
+
+func (t *TransferScreen) selectedFolders() []string {
+	var folders []string
+	for _, f := range t.folderOptions {
+		if f.selected {
+			folders = append(folders, f.dirName)
+		}
+	}
+	return folders
+}
+
+func (t *TransferScreen) selectedLabels() []string {
+	var labels []string
+	for _, f := range t.folderOptions {
+		if f.selected {
+			labels = append(labels, f.label)
+		}
+	}
+	return labels
+}
+
 func (t *TransferScreen) connect() tea.Cmd {
 	backend := t.backend
 	return func() tea.Msg {
-		err := backend.Connect()
+		ctx := context.Background()
+		err := backend.Connect(ctx)
 		return transferConnectMsg{err: err}
 	}
 }
@@ -196,30 +284,53 @@ func (t *TransferScreen) connect() tea.Cmd {
 func (t *TransferScreen) buildPlan() tea.Cmd {
 	backend := t.backend
 	cfg := t.cfg
+	selected := t.selectedFolders()
+	t.planFolderLabels = t.selectedLabels()
+
 	return func() tea.Msg {
-		var sourceDir string
+		ctx := context.Background()
+		rootDir := ""
 		if len(cfg.SourceDirs) > 0 {
-			sourceDir = cfg.SourceDirs[0]
+			rootDir = cfg.SourceDirs[0]
 		}
-		remoteBase := cfg.Device.ROMPath
-		if _, ok := backend.(*transfer.USBBackend); ok {
-			remoteBase = ""
+
+		var plans []*transfer.TransferPlan
+		for _, folder := range selected {
+			localDir := filepath.Join(rootDir, folder)
+			var remoteBase string
+			if _, ok := backend.(*transfer.USBBackend); ok {
+				remoteBase = folder
+			} else {
+				remoteBase = path.Join(cfg.Device.RootPath, folder)
+			}
+			plan, err := transfer.BuildTransferPlan(ctx, backend, localDir, remoteBase, cfg.Transfer.SyncMode)
+			if err != nil {
+				continue // skip folders that don't exist locally
+			}
+			plans = append(plans, plan)
 		}
-		plan, err := transfer.BuildTransferPlan(backend, sourceDir, remoteBase, cfg.Transfer.SyncMode)
-		return transferPlanMsg{plan: plan, err: err}
+		merged := transfer.MergeTransferPlans(plans...)
+		return transferPlanMsg{plan: merged}
 	}
 }
 
 func (t *TransferScreen) startTransfer() tea.Cmd {
 	backend := t.backend
 	plan := t.plan
+	concurrency := t.cfg.Transfer.Concurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cancel = cancel
 
 	progressCh := make(chan transfer.TransferProgress, 100)
 	t.progressCh = progressCh
 
 	errCh := make(chan error, 1)
 	go func() {
-		err := transfer.Execute(backend, plan, progressCh)
+		err := transfer.Execute(ctx, backend, plan, concurrency, progressCh)
 		errCh <- err
 	}()
 
@@ -250,6 +361,8 @@ func (t *TransferScreen) View() string {
 	switch t.phase {
 	case transferPhaseMethod:
 		return t.viewMethod()
+	case transferPhaseFolders:
+		return t.viewFolders()
 	case transferPhaseConnect:
 		return t.viewConnect()
 	case transferPhasePlan:
@@ -284,12 +397,33 @@ func (t *TransferScreen) viewMethod() string {
 
 	if t.cursor == 2 {
 		s += "\n" + tui.StyleDim.Render("Manual transfer instructions:") + "\n"
-		s += tui.StyleDim.Render("1. Copy the 'organized' folder to a USB drive or SD card") + "\n"
+		s += tui.StyleDim.Render("1. Copy the desired folders (roms/, bios/, saves/, config/) to a USB drive") + "\n"
 		s += tui.StyleDim.Render("2. Insert into your ReplayOS device") + "\n"
-		s += tui.StyleDim.Render("3. Copy folders to /roms/ on the device") + "\n"
+		s += tui.StyleDim.Render("3. Merge folders at the device root") + "\n"
 	}
 
 	s += "\n" + tui.StyleDim.Render("enter: select  esc: back")
+	return lipgloss.NewStyle().Padding(1, 2).Render(s)
+}
+
+func (t *TransferScreen) viewFolders() string {
+	s := tui.StyleSubtitle.Render("Select Folders") + "\n\n"
+
+	for i, f := range t.folderOptions {
+		check := "[ ]"
+		if f.selected {
+			check = "[x]"
+		}
+		cursor := "  "
+		style := tui.StyleNormal
+		if i == t.folderCursor {
+			cursor = tui.StyleMenuCursor.String()
+			style = tui.StyleSelected
+		}
+		s += cursor + style.Render(fmt.Sprintf("%s %-10s %s/", check, f.label, f.dirName)) + "\n"
+	}
+
+	s += "\n" + tui.StyleDim.Render("space: toggle  enter: confirm  esc: back")
 	return lipgloss.NewStyle().Padding(1, 2).Render(s)
 }
 
@@ -307,6 +441,9 @@ func (t *TransferScreen) viewPlan() string {
 		return lipgloss.NewStyle().Padding(1, 2).Render(s)
 	}
 
+	if len(t.planFolderLabels) > 0 {
+		s += fmt.Sprintf("Folders:           %s\n", strings.Join(t.planFolderLabels, ", "))
+	}
 	total := len(t.plan.Items)
 	s += fmt.Sprintf("Files to transfer: %d\n", total-t.plan.SkipCount)
 	if t.plan.SkipCount > 0 {
@@ -335,6 +472,8 @@ func (t *TransferScreen) viewProgress() string {
 			s += renderProgressBar(totalPct, 40) + "\n"
 		}
 	}
+
+	s += "\n" + tui.StyleDim.Render("esc: cancel transfer")
 
 	return lipgloss.NewStyle().Padding(1, 2).Render(s)
 }

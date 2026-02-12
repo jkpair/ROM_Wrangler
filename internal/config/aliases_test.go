@@ -22,7 +22,7 @@ func TestResolveAlias_DefaultAliases(t *testing.T) {
 		{"snes", "snes", systems.NintendoSNES},
 		{"nes", "nes", systems.NintendoNES},
 		{"gba", "gba", systems.NintendoGBA},
-		{"mame", "mame", systems.Arcade},
+		{"mame", "mame", systems.ArcadeMAME},
 		{"with spaces", "  dreamcast  ", systems.SegaDC},
 	}
 

@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,7 @@ func TestHashFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hashes, err := HashFile(path)
+	hashes, err := HashFile(context.Background(), path)
 	if err != nil {
 		t.Fatalf("HashFile failed: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestHashFile(t *testing.T) {
 }
 
 func TestHashFile_NotFound(t *testing.T) {
-	_, err := HashFile("/nonexistent/file.bin")
+	_, err := HashFile(context.Background(), "/nonexistent/file.bin")
 	if err == nil {
 		t.Error("expected error for nonexistent file")
 	}

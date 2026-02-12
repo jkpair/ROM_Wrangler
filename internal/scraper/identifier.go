@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
@@ -35,11 +36,11 @@ func NewIdentifier(datIndices []*DATIndex, ssClient *ScreenScraperClient, cache 
 // 3. Try DAT files
 // 4. Try ScreenScraper API
 // 5. Cache and return result
-func (id *Identifier) Identify(filePath string, systemID systems.SystemID) (*ROMMatch, error) {
+func (id *Identifier) Identify(ctx context.Context, filePath string, systemID systems.SystemID) (*ROMMatch, error) {
 	match := &ROMMatch{FilePath: filePath}
 
 	// Hash the file
-	hashes, err := HashFile(filePath)
+	hashes, err := HashFile(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +74,7 @@ func (id *Identifier) Identify(filePath string, systemID systems.SystemID) (*ROM
 
 	// Try ScreenScraper
 	if id.ssClient != nil {
-		info, err := id.ssClient.Identify(hashes, systemID)
+		info, err := id.ssClient.Identify(ctx, hashes, systemID)
 		if err != nil {
 			// Non-fatal: just means we couldn't identify
 			return match, nil

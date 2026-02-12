@@ -1,18 +1,21 @@
 package transfer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 )
 
 // TransferBackend is the interface for transfer methods.
 type TransferBackend interface {
-	Connect() error
+	Connect(ctx context.Context) error
 	Close() error
 	MkdirAll(path string) error
 	FileExists(path string, expectedSize int64) (bool, error)
-	Upload(localPath, remotePath string, progressFn func(written int64)) error
+	Upload(ctx context.Context, localPath, remotePath string, progressFn func(written int64)) error
 }
 
 // TransferItem describes a single file to transfer.
@@ -45,13 +48,20 @@ type TransferProgress struct {
 
 // BuildTransferPlan builds a list of files to transfer.
 // In sync mode, it checks if files already exist on the destination.
-func BuildTransferPlan(backend TransferBackend, localDir, remoteBase string, syncMode bool) (*TransferPlan, error) {
+func BuildTransferPlan(ctx context.Context, backend TransferBackend, localDir, remoteBase string, syncMode bool) (*TransferPlan, error) {
 	plan := &TransferPlan{}
 
 	err := filepath.Walk(localDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if info.IsDir() && info.Name() == "_archive" {
 			return filepath.SkipDir
 		}
@@ -90,78 +100,137 @@ func BuildTransferPlan(backend TransferBackend, localDir, remoteBase string, syn
 	return plan, nil
 }
 
-// Execute runs the transfer plan.
-func Execute(backend TransferBackend, plan *TransferPlan, progressCh chan<- TransferProgress) error {
-	var totalSent int64
-	transferIdx := 0
-
-	for i, item := range plan.Items {
-		if item.Skip {
-			continue
-		}
-
-		// Ensure remote directory exists
-		remoteDir := filepath.ToSlash(filepath.Dir(item.RemotePath))
-		if err := backend.MkdirAll(remoteDir); err != nil {
-			sendProgress(progressCh, TransferProgress{
-				FileIndex: transferIdx, TotalFiles: len(plan.Items) - plan.SkipCount,
-				Filename: filepath.Base(item.LocalPath), Err: err,
-			})
-			continue
-		}
-
-		if progressCh != nil {
-			progressCh <- TransferProgress{
-				FileIndex:  transferIdx,
-				TotalFiles: len(plan.Items) - plan.SkipCount,
-				Filename:   filepath.Base(item.LocalPath),
-				FileSize:   item.Size,
-				TotalSent:  totalSent,
-				TotalSize:  plan.TotalSize,
-			}
-		}
-
-		err := backend.Upload(item.LocalPath, item.RemotePath, func(written int64) {
-			sendProgress(progressCh, TransferProgress{
-				FileIndex:  transferIdx,
-				TotalFiles: len(plan.Items) - plan.SkipCount,
-				Filename:   filepath.Base(plan.Items[i].LocalPath),
-				BytesSent:  written,
-				FileSize:   item.Size,
-				TotalSent:  totalSent + written,
-				TotalSize:  plan.TotalSize,
-			})
-		})
-
-		if err != nil {
-			sendProgress(progressCh, TransferProgress{
-				FileIndex: transferIdx, TotalFiles: len(plan.Items) - plan.SkipCount,
-				Filename: filepath.Base(item.LocalPath), Err: err,
-			})
-		} else {
-			totalSent += item.Size
-			sendProgress(progressCh, TransferProgress{
-				FileIndex:  transferIdx,
-				TotalFiles: len(plan.Items) - plan.SkipCount,
-				Filename:   filepath.Base(item.LocalPath),
-				BytesSent:  item.Size,
-				FileSize:   item.Size,
-				TotalSent:  totalSent,
-				TotalSize:  plan.TotalSize,
-				Done:       true,
-			})
-		}
-		transferIdx++
+// Execute runs the transfer plan with the given concurrency level.
+// Use concurrency=1 for sequential execution.
+func Execute(ctx context.Context, backend TransferBackend, plan *TransferPlan, concurrency int, progressCh chan<- TransferProgress) error {
+	if concurrency < 1 {
+		concurrency = 1
 	}
 
+	// Collect non-skipped items
+	var items []TransferItem
+	for _, item := range plan.Items {
+		if !item.Skip {
+			items = append(items, item)
+		}
+	}
+	totalFiles := len(items)
+	if totalFiles == 0 {
+		if progressCh != nil {
+			close(progressCh)
+		}
+		return nil
+	}
+
+	var totalSent atomic.Int64
+	var firstErr atomic.Value
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for idx, item := range items {
+		select {
+		case <-ctx.Done():
+			// Wait for in-flight uploads before closing channel
+			wg.Wait()
+			if progressCh != nil {
+				close(progressCh)
+			}
+			return ctx.Err()
+		default:
+		}
+
+		sem <- struct{}{} // acquire
+		wg.Add(1)
+
+		go func(fileIdx int, item TransferItem) {
+			defer wg.Done()
+			defer func() { <-sem }() // release
+
+			// Ensure remote directory exists
+			remoteDir := filepath.ToSlash(filepath.Dir(item.RemotePath))
+			if err := backend.MkdirAll(remoteDir); err != nil {
+				sendProgressNonBlocking(progressCh, TransferProgress{
+					FileIndex: fileIdx, TotalFiles: totalFiles,
+					Filename: filepath.Base(item.LocalPath), Err: err,
+				})
+				return
+			}
+
+			sendProgressNonBlocking(progressCh, TransferProgress{
+				FileIndex:  fileIdx,
+				TotalFiles: totalFiles,
+				Filename:   filepath.Base(item.LocalPath),
+				FileSize:   item.Size,
+				TotalSent:  totalSent.Load(),
+				TotalSize:  plan.TotalSize,
+			})
+
+			err := backend.Upload(ctx, item.LocalPath, item.RemotePath, func(written int64) {
+				sendProgressNonBlocking(progressCh, TransferProgress{
+					FileIndex:  fileIdx,
+					TotalFiles: totalFiles,
+					Filename:   filepath.Base(item.LocalPath),
+					BytesSent:  written,
+					FileSize:   item.Size,
+					TotalSent:  totalSent.Load() + written,
+					TotalSize:  plan.TotalSize,
+				})
+			})
+
+			if err != nil {
+				firstErr.CompareAndSwap(nil, err)
+				sendProgressNonBlocking(progressCh, TransferProgress{
+					FileIndex: fileIdx, TotalFiles: totalFiles,
+					Filename: filepath.Base(item.LocalPath), Err: err,
+				})
+			} else {
+				totalSent.Add(item.Size)
+				sendProgressNonBlocking(progressCh, TransferProgress{
+					FileIndex:  fileIdx,
+					TotalFiles: totalFiles,
+					Filename:   filepath.Base(item.LocalPath),
+					BytesSent:  item.Size,
+					FileSize:   item.Size,
+					TotalSent:  totalSent.Load(),
+					TotalSize:  plan.TotalSize,
+					Done:       true,
+				})
+			}
+		}(idx, item)
+	}
+
+	wg.Wait()
 	if progressCh != nil {
 		close(progressCh)
+	}
+
+	if v := firstErr.Load(); v != nil {
+		return v.(error)
 	}
 	return nil
 }
 
-func sendProgress(ch chan<- TransferProgress, p TransferProgress) {
-	if ch != nil {
-		ch <- p
+// MergeTransferPlans combines multiple plans into one.
+func MergeTransferPlans(plans ...*TransferPlan) *TransferPlan {
+	merged := &TransferPlan{}
+	for _, p := range plans {
+		if p == nil {
+			continue
+		}
+		merged.Items = append(merged.Items, p.Items...)
+		merged.TotalSize += p.TotalSize
+		merged.SkipCount += p.SkipCount
+	}
+	return merged
+}
+
+// sendProgressNonBlocking sends progress without blocking if the consumer is slow.
+func sendProgressNonBlocking(ch chan<- TransferProgress, p TransferProgress) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- p:
+	default:
 	}
 }

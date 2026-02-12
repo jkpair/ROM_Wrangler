@@ -1,6 +1,7 @@
 package transfer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,14 +11,14 @@ func TestUSBBackend_Connect(t *testing.T) {
 	dir := t.TempDir()
 	backend := NewUSBBackend(dir)
 
-	if err := backend.Connect(); err != nil {
+	if err := backend.Connect(context.Background()); err != nil {
 		t.Fatalf("Connect failed: %v", err)
 	}
 }
 
 func TestUSBBackend_Connect_NotFound(t *testing.T) {
 	backend := NewUSBBackend("/nonexistent/path")
-	if err := backend.Connect(); err == nil {
+	if err := backend.Connect(context.Background()); err == nil {
 		t.Error("expected error for nonexistent path")
 	}
 }
@@ -32,10 +33,10 @@ func TestUSBBackend_Upload(t *testing.T) {
 	os.WriteFile(srcFile, content, 0644)
 
 	backend := NewUSBBackend(dstDir)
-	backend.Connect()
+	backend.Connect(context.Background())
 
 	var lastWritten int64
-	err := backend.Upload(srcFile, "/roms/test.bin", func(written int64) {
+	err := backend.Upload(context.Background(), srcFile, "/roms/test.bin", func(written int64) {
 		lastWritten = written
 	})
 	if err != nil {
@@ -95,9 +96,9 @@ func TestBuildTransferPlan(t *testing.T) {
 	os.WriteFile(filepath.Join(srcDir, "sega_dc", "game2.chd"), []byte("CHD data 2"), 0644)
 
 	backend := NewUSBBackend(dstDir)
-	backend.Connect()
+	backend.Connect(context.Background())
 
-	plan, err := BuildTransferPlan(backend, srcDir, "/roms", false)
+	plan, err := BuildTransferPlan(context.Background(), backend, srcDir, "/roms", false)
 	if err != nil {
 		t.Fatalf("BuildTransferPlan failed: %v", err)
 	}
@@ -121,14 +122,33 @@ func TestBuildTransferPlan_SyncMode(t *testing.T) {
 	os.WriteFile(filepath.Join(dstDir, "roms", "nes", "game.nes"), content, 0644)
 
 	backend := NewUSBBackend(dstDir)
-	backend.Connect()
+	backend.Connect(context.Background())
 
-	plan, err := BuildTransferPlan(backend, srcDir, "/roms", true)
+	plan, err := BuildTransferPlan(context.Background(), backend, srcDir, "/roms", true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if plan.SkipCount != 1 {
 		t.Errorf("expected 1 skip, got %d", plan.SkipCount)
+	}
+}
+
+func TestUSBBackend_Upload_Cancelled(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	srcFile := filepath.Join(srcDir, "test.bin")
+	os.WriteFile(srcFile, []byte("data"), 0644)
+
+	backend := NewUSBBackend(dstDir)
+	backend.Connect(context.Background())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	err := backend.Upload(ctx, srcFile, "/roms/test.bin", nil)
+	if err == nil {
+		t.Error("expected error for cancelled context")
 	}
 }

@@ -55,13 +55,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, Keys.Quit) && len(a.screenStack) <= 1:
+		if key.Matches(msg, Keys.Quit) && len(a.screenStack) <= 1 {
 			return a, tea.Quit
-		case key.Matches(msg, Keys.Back) && len(a.screenStack) > 1:
-			a.screenStack = a.screenStack[:len(a.screenStack)-1]
-			return a, nil
 		}
+		// Let the current screen handle the key first (including Esc).
+		// Screens that want to navigate back will send NavigateBackMsg.
 
 	case NavigateMsg:
 		screen := a.factory(msg.Screen, a.cfg, a.width, a.height)
@@ -101,11 +99,14 @@ func (a *App) View() string {
 		content = a.current().View()
 	}
 
-	// Header
-	header := StyleTitle.
-		Width(a.width).
-		Align(lipgloss.Center).
-		Render("ROM Wrangler")
+	// Header — hidden on home screen where the ASCII logo serves as branding
+	var header string
+	if len(a.screenStack) > 1 {
+		header = StyleTitle.
+			Width(a.width).
+			Align(lipgloss.Center).
+			Render("ROM Wrangler")
+	}
 
 	// Status bar
 	helpKeys := []string{}
@@ -127,13 +128,20 @@ func (a *App) View() string {
 		)
 
 	// Layout
-	contentHeight := a.height - lipgloss.Height(header) - lipgloss.Height(statusBar)
+	headerHeight := 0
+	if header != "" {
+		headerHeight = lipgloss.Height(header)
+	}
+	contentHeight := a.height - headerHeight - lipgloss.Height(statusBar)
 	body := lipgloss.NewStyle().
 		Height(contentHeight).
 		Width(a.width).
 		Render(content)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, statusBar)
+	if header != "" {
+		return lipgloss.JoinVertical(lipgloss.Left, header, body, statusBar)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, body, statusBar)
 }
 
 func (a *App) current() Screen {

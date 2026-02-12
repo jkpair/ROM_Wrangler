@@ -32,7 +32,7 @@ func DetectSets(files []string) (sets []MultiDiscSet, standalone []string) {
 			continue
 		}
 
-		baseName := strings.TrimSpace(StripDiscPattern(nameNoExt))
+		baseName := StripDiscPattern(nameNoExt)
 		discNum := ExtractDiscNumber(nameNoExt)
 
 		groups[baseName] = append(groups[baseName], DiscFile{

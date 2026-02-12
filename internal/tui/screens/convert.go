@@ -74,7 +74,7 @@ func NewConvertScreen(cfg *config.Config, width, height int) *ConvertScreen {
 }
 
 func (c *ConvertScreen) Init() tea.Cmd {
-	dirs := c.cfg.SourceDirs
+	dirs := c.cfg.ROMDirs()
 	chdmanCfg := c.cfg.ChdmanPath
 	return func() tea.Msg {
 		path, err := converter.FindChdman(chdmanCfg)
@@ -85,7 +85,13 @@ func (c *ConvertScreen) Init() tea.Cmd {
 		var files []string
 		for _, dir := range dirs {
 			filepath.Walk(dir, func(p string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
+				if err != nil {
+					return nil
+				}
+				if info.IsDir() && info.Name() == "_archive" {
+					return filepath.SkipDir
+				}
+				if info.IsDir() {
 					return nil
 				}
 				if converter.IsConvertible(p) {
@@ -275,7 +281,7 @@ func (c *ConvertScreen) viewSelect() string {
 	s := tui.StyleSubtitle.Render("Select files to convert to CHD") + "\n\n"
 
 	if len(c.files) == 0 {
-		s += tui.StyleDim.Render("No convertible files found (GDI/CUE/ISO).\n")
+		s += tui.StyleDim.Render("No convertible files found (GDI/CUE/ISO).") + "\n\n"
 		s += tui.StyleDim.Render("Configure source directories in Settings first.")
 		return lipgloss.NewStyle().Padding(1, 2).Render(s)
 	}

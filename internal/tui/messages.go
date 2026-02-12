@@ -36,8 +36,13 @@ type ScreenID int
 const (
 	ScreenHome ScreenID = iota
 	ScreenManage
+	ScreenDecompress
+	ScreenArchive
 	ScreenConvert
 	ScreenTransfer
 	ScreenSettings
 	ScreenSetup
+	ScreenReplayOS
+	ScreenBIOS
+	ScreenM3U
 )

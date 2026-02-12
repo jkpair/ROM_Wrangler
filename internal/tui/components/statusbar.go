@@ -31,6 +31,6 @@ func (s StatusBar) View() string {
 		Width(s.Width).
 		BorderTop(true).
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(tui.ColorDimGray).
+		BorderForeground(tui.ColorBorderDim).
 		Render(row)
 }

@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha1"
 	"fmt"
@@ -9,8 +10,12 @@ import (
 	"os"
 )
 
+// hashBufSize is the buffer size for hashing (256KB).
+const hashBufSize = 256 * 1024
+
 // HashFile computes CRC32, MD5, and SHA1 of a file in a single pass.
-func HashFile(path string) (FileHashes, error) {
+// It checks ctx for cancellation between read chunks.
+func HashFile(ctx context.Context, path string) (FileHashes, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return FileHashes{}, err
@@ -27,8 +32,27 @@ func HashFile(path string) (FileHashes, error) {
 	sh := sha1.New()
 
 	w := io.MultiWriter(crc, md, sh)
-	if _, err := io.Copy(w, f); err != nil {
-		return FileHashes{}, err
+	buf := make([]byte, hashBufSize)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return FileHashes{}, ctx.Err()
+		default:
+		}
+
+		n, err := f.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return FileHashes{}, werr
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return FileHashes{}, err
+		}
 	}
 
 	return FileHashes{

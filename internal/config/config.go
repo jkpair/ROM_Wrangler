@@ -24,7 +24,7 @@ type DeviceConfig struct {
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
-	ROMPath  string `yaml:"rom_path"`
+	RootPath string `yaml:"root_path"`
 }
 
 type ScrapingConfig struct {
@@ -48,7 +48,7 @@ func DefaultConfig() *Config {
 			Port:     22,
 			User:     "root",
 			Password: "replayos",
-			ROMPath:  "/roms",
+			RootPath: "/",
 		},
 		Transfer: TransferConfig{
 			Method:      "sftp",
@@ -101,7 +101,7 @@ func (cfg *Config) expandPaths() {
 		cfg.SourceDirs[i] = expandTilde(d, home)
 	}
 	cfg.ChdmanPath = expandTilde(cfg.ChdmanPath, home)
-	cfg.Device.ROMPath = expandTilde(cfg.Device.ROMPath, home)
+	cfg.Device.RootPath = expandTilde(cfg.Device.RootPath, home)
 	cfg.Transfer.USBPath = expandTilde(cfg.Transfer.USBPath, home)
 	for i, d := range cfg.Scraping.DATDirs {
 		cfg.Scraping.DATDirs[i] = expandTilde(d, home)
@@ -116,6 +116,15 @@ func expandTilde(path, home string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
+}
+
+// ROMDirs returns the ROM directories (SourceDirs[i]/roms) for each root.
+func (cfg *Config) ROMDirs() []string {
+	dirs := make([]string, len(cfg.SourceDirs))
+	for i, d := range cfg.SourceDirs {
+		dirs[i] = filepath.Join(d, "roms")
+	}
+	return dirs
 }
 
 func Save(cfg *Config, path string) error {
