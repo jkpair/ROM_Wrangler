@@ -76,9 +76,11 @@ make run
    romwrangler
    ```
 
-2. **Configure source directories:** Navigate to **Settings > General** and enter the paths to your ROM folders (comma-separated). Press `Ctrl+S` to save.
+2. **Configure source directories:** Navigate to **Settings > General** and enter the paths to your source folder for bios, roms, etc. (example: /home/kurlmarx/Games/replayos) Press `Ctrl+S` to save.
+   Should look like this
+<img width="525" height="555" alt="Screenshot_20260211_233240" src="https://github.com/user-attachments/assets/37eb7f2f-d143-442b-8ec8-c8897ef25146" />
 
-3. **Organize your ROMs:** Go to **Manage ROMs**. The scanner expects your source directories to contain subfolders named after systems — for example:
+4. **Organize your ROMs:** Go to **Manage ROMs**. The scanner expects your source directories to contain subfolders named after systems — for example:
 
    ```
    /home/you/roms/
@@ -100,7 +102,7 @@ make run
 
    The scanner resolves folder names like `nes`, `genesis`, `psx`, `dreamcast`, `snes`, `gba`, `mame`, etc. to the correct system. See the full alias list below.
 
-4. **The Manage ROMs pipeline:**
+5. **The Manage ROMs pipeline:**
 
    The manage screen walks you through each step, skipping any that don't apply:
 
@@ -127,7 +129,7 @@ make run
        Final Fantasy VII (USA).m3u
    ```
 
-5. **Transfer to your device:** Go to **Transfer** and choose SFTP, USB, or manual. Select which folders to send (ROMs, BIOS, Saves, Config), review the transfer plan, and start. Progress is tracked per-file and overall.
+6. **Transfer to your device:** Go to **Transfer** and choose SFTP, USB, or manual. Select which folders to send (ROMs, BIOS, Saves, Config), review the transfer plan, and start. Progress is tracked per-file and overall.
 
 ## Home Screen
 
