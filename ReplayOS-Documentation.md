@@ -109,7 +109,7 @@ ReplayOS includes a fixed set of optimized libretro cores. Custom core additions
 
 ## Folder Structure
 
-Here is the exact folder structure of the ReplayOS environment your application interacts with:
+Here is the exact folder structure of the ReplayOS environment:
 ```
 ├── bios
 ├── captures
