@@ -130,6 +130,33 @@ func ArchiveFilteredFiles(paths []string, sourceRoots []string, archiveDir strin
 	return result
 }
 
+// ArchiveUnsupported moves unresolved and unsupported files to the archive
+// directory, preserving their relative path from the source roots.
+func ArchiveUnsupported(unresolved, unsupported []string, sourceRoots []string, archiveDir string) *ArchiveResult {
+	result := &ArchiveResult{}
+	all := make([]string, 0, len(unresolved)+len(unsupported))
+	all = append(all, unresolved...)
+	all = append(all, unsupported...)
+
+	for _, filePath := range all {
+		relPath := computeRelativePath(sourceRoots, filePath)
+		archivePath := filepath.Join(archiveDir, relPath)
+
+		if err := os.MkdirAll(filepath.Dir(archivePath), 0755); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("mkdir %s: %w", archivePath, err))
+			continue
+		}
+
+		if err := moveFile(filePath, archivePath); err != nil {
+			result.Errors = append(result.Errors, fmt.Errorf("move %s: %w", filePath, err))
+			continue
+		}
+		result.FilesMoved++
+	}
+
+	return result
+}
+
 // moveFile attempts os.Rename first, falling back to copy+delete for
 // cross-device moves.
 func moveFile(src, dst string) error {

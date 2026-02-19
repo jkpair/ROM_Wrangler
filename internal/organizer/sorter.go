@@ -1,6 +1,7 @@
 package organizer
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -102,13 +103,16 @@ func BuildSortPlan(scanResult *ScanResult, device devices.Device, outputDir stri
 				})
 			}
 
-			// Generate M3U
-			m3uContent := multidisc.GenerateM3U(set, "", false)
-			plan.M3Us = append(plan.M3Us, M3UAction{
-				Path:    filepath.Join(destDir, set.BaseName+".m3u"),
-				Content: m3uContent,
-				System:  systemID,
-			})
+			// Generate M3U (skip if already exists)
+			m3uPath := filepath.Join(destDir, set.BaseName+".m3u")
+			if _, err := os.Stat(m3uPath); err != nil {
+				m3uContent := multidisc.GenerateM3U(set, "", false)
+				plan.M3Us = append(plan.M3Us, M3UAction{
+					Path:    m3uPath,
+					Content: m3uContent,
+					System:  systemID,
+				})
+			}
 		}
 	}
 

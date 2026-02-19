@@ -135,9 +135,17 @@ func (c *ScreenScraperClient) Identify(ctx context.Context, hashes FileHashes, s
 	year := extractDate(game.Dates)
 	desc := extractSynopsis(game.Synopsis)
 
+	// Use API-detected system if no systemID was provided
+	detectedSystem := systemID
+	if detectedSystem == "" {
+		if mapped, ok := ScreenScraperToSystemID(game.SystemID); ok {
+			detectedSystem = mapped
+		}
+	}
+
 	return &GameInfo{
 		Name:        name,
-		System:      systemID,
+		System:      detectedSystem,
 		Description: desc,
 		Publisher:   game.Publisher.Text,
 		Year:        year,
