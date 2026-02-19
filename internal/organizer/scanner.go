@@ -10,6 +10,17 @@ import (
 	"github.com/kurlmarx/romwrangler/internal/systems"
 )
 
+// skipFolders contains directory names that should be skipped during scanning.
+// These include the archive folder and ReplayOS special folders that contain
+// system files (.lr, .sh, .rec) rather than ROMs.
+var skipFolders = map[string]bool{
+	"_archive":   true,
+	"_extra":     true,
+	"_recent":    true,
+	"_favorites": true,
+	"_autostart": true,
+}
+
 // ScannedFile represents a discovered file in the source directories.
 type ScannedFile struct {
 	Path     string
@@ -23,6 +34,7 @@ type ScanResult struct {
 	BySystem    map[systems.SystemID][]ScannedFile
 	Convertible []ScannedFile // disc images that can be converted to CHD
 	Unresolved  []string      // files in dirs that couldn't be matched to a system
+	Unsupported []string      // files in system dirs with unsupported extensions
 	Errors      []error
 }
 
@@ -41,8 +53,8 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 		}
 
 		for _, entry := range entries {
-			if entry.Name() == "_archive" {
-				continue // skip archive directory
+			if skipFolders[entry.Name()] {
+				continue // skip archive and special directories
 			}
 			subPath := filepath.Join(dir, entry.Name())
 
@@ -55,7 +67,7 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 						if err != nil {
 							return nil
 						}
-						if info.IsDir() && info.Name() == "_archive" {
+						if info.IsDir() && skipFolders[info.Name()] {
 							return filepath.SkipDir
 						}
 						if info.IsDir() {
@@ -72,7 +84,7 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 					if err != nil {
 						return nil
 					}
-					if info.IsDir() && info.Name() == "_archive" {
+					if info.IsDir() && skipFolders[info.Name()] {
 						return filepath.SkipDir
 					}
 					if info.IsDir() {
@@ -81,6 +93,7 @@ func Scan(dirs []string, aliases map[string]string) *ScanResult {
 
 					ext := strings.ToLower(filepath.Ext(path))
 					if !systems.IsValidFormat(systemID, ext) {
+						result.Unsupported = append(result.Unsupported, path)
 						return nil
 					}
 
