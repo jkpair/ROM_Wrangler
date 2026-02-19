@@ -18,7 +18,7 @@ const (
 	sectionMenu     settingsSection = iota
 	sectionGeneral                  // fields: source dirs, chdman, delete archive
 	sectionTransfer                 // sub-menu: SFTP, USB, Concurrency
-	sectionSFTP                     // fields: host, port, user, password, ROM path
+	sectionNetwork                  // fields: host, port, user, password, ROM path
 	sectionUSB                      // fields: USB path
 	sectionConcurrency              // fields: concurrency
 )
@@ -45,7 +45,7 @@ type SettingsScreen struct {
 }
 
 var mainMenuItems = []string{"General", "Transfer", "Setup ROM Folders", "Setup BIOS Folders"}
-var transferMenuItems = []string{"SFTP Settings", "USB Settings", "Concurrency"}
+var transferMenuItems = []string{"Network Settings", "USB Settings", "Concurrency"}
 
 func NewSettingsScreen(cfg *config.Config, width, height int) *SettingsScreen {
 	s := &SettingsScreen{
@@ -146,9 +146,9 @@ func (s *SettingsScreen) updateTransferMenu(msg tea.KeyMsg) (tui.Screen, tea.Cmd
 		s.fieldCursor = 0
 		switch s.menuCursor {
 		case 0:
-			s.section = sectionSFTP
-			s.sectionTitle = "SFTP"
-			s.buildSFTPFields()
+			s.section = sectionNetwork
+			s.sectionTitle = "Network"
+			s.buildNetworkFields()
 		case 1:
 			s.section = sectionUSB
 			s.sectionTitle = "USB"
@@ -214,7 +214,7 @@ func (s *SettingsScreen) buildGeneralFields() {
 	}
 }
 
-func (s *SettingsScreen) buildSFTPFields() {
+func (s *SettingsScreen) buildNetworkFields() {
 	s.fields = []settingsField{
 		s.makeField("Host", s.cfg.Device.Host),
 		s.makeField("Port", fmt.Sprintf("%d", s.cfg.Device.Port)),
@@ -260,7 +260,7 @@ func (s *SettingsScreen) applyFields() {
 		s.cfg.ChdmanPath = s.fields[1].input.Value()
 		s.cfg.DeleteArchive = s.fields[2].input.Value() == "true"
 
-	case sectionSFTP:
+	case sectionNetwork:
 		s.cfg.Device.Host = s.fields[0].input.Value()
 		fmt.Sscanf(s.fields[1].input.Value(), "%d", &s.cfg.Device.Port)
 		s.cfg.Device.User = s.fields[2].input.Value()

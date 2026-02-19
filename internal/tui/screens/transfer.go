@@ -44,8 +44,8 @@ type transferDoneMsg struct {
 }
 
 type transferFolder struct {
-	label    string // "ROMs", "BIOS", "Saves", "Config"
-	dirName  string // "roms", "bios", "saves", "config"
+	label   string // "ROMs", "BIOS", "Saves", "Config"
+	dirName string // "roms", "bios", "saves", "config"
 	selected bool
 }
 
@@ -57,19 +57,24 @@ type TransferScreen struct {
 	// Method selection
 	methods []string
 	cursor  int
+	toolErr string // shown when a required tool (sshpass/rsync) is missing
 
 	// Folder selection
 	folderOptions []transferFolder
 	folderCursor  int
 
-	// Connection
+	// Connection (USB path)
 	backend    transfer.TransferBackend
 	connectErr error
 
-	// Plan
+	// Plan (USB)
 	plan             *transfer.TransferPlan
 	planErr          error
-	planFolderLabels []string // folder labels included in the plan
+	planFolderLabels []string
+
+	// Bulk backend (rsync)
+	bulkBackend transfer.BulkTransferBackend
+	isBulk      bool
 
 	// Progress
 	progressCh      <-chan transfer.TransferProgress
@@ -79,7 +84,7 @@ type TransferScreen struct {
 	cancel context.CancelFunc
 
 	// Results
-	filesTransferred int
+	itemsTransferred int // files (USB) or folders (rsync)
 	totalErr         error
 }
 
@@ -88,7 +93,11 @@ func NewTransferScreen(cfg *config.Config, width, height int) *TransferScreen {
 		cfg:    cfg,
 		width:  width,
 		height: height,
-		methods: []string{"SFTP (Network)", "USB / SD Card", "Manual Instructions"},
+		methods: []string{
+			"rsync - Fast incremental sync over SSH",
+			"USB / SD Card",
+			"Manual Instructions",
+		},
 	}
 }
 
@@ -120,9 +129,8 @@ func (t *TransferScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 	case transferProgressMsg:
 		t.currentProgress = msg.progress
 		if msg.progress.Done {
-			t.filesTransferred++
+			t.itemsTransferred++
 		}
-		// Keep listening for more progress
 		return t, listenTransferProgress(t.progressCh)
 
 	case transferDoneMsg:
@@ -139,7 +147,6 @@ func (t *TransferScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 		case transferPhasePlan:
 			return t.updatePlan(msg)
 		case transferPhaseProgress:
-			// Allow cancellation during progress
 			if key.Matches(msg, tui.Keys.Back) {
 				if t.cancel != nil {
 					t.cancel()
@@ -147,21 +154,26 @@ func (t *TransferScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 			}
 		case transferPhaseResults:
 			if key.Matches(msg, tui.Keys.Back) || key.Matches(msg, tui.Keys.Enter) {
-				if t.backend != nil {
-					t.backend.Close()
-				}
+				t.closeBackends()
 				return t, func() tea.Msg { return tui.NavigateBackMsg{} }
 			}
 		default:
 			if key.Matches(msg, tui.Keys.Back) {
-				if t.backend != nil {
-					t.backend.Close()
-				}
+				t.closeBackends()
 				return t, func() tea.Msg { return tui.NavigateBackMsg{} }
 			}
 		}
 	}
 	return t, nil
+}
+
+func (t *TransferScreen) closeBackends() {
+	if t.backend != nil {
+		t.backend.Close()
+	}
+	if t.bulkBackend != nil {
+		t.bulkBackend.Close()
+	}
 }
 
 func (t *TransferScreen) updateMethod(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
@@ -177,22 +189,35 @@ func (t *TransferScreen) updateMethod(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 			t.cursor++
 		}
 	case key.Matches(msg, tui.Keys.Enter):
+		t.toolErr = ""
 		switch t.cursor {
-		case 0: // SFTP
-			t.backend = transfer.NewSFTPBackend(
+		case 0: // rsync
+			if _, err := transfer.FindTool("sshpass"); err != nil {
+				t.toolErr = "Requires 'sshpass' \u2014 install: sudo pacman -S sshpass"
+				return t, nil
+			}
+			if _, err := transfer.FindTool("rsync"); err != nil {
+				t.toolErr = "Requires 'rsync' \u2014 install: sudo pacman -S rsync"
+				return t, nil
+			}
+			backend := transfer.NewRsyncBackend(
 				t.cfg.Device.Host,
 				t.cfg.Device.Port,
 				t.cfg.Device.User,
 				t.cfg.Device.Password,
 			)
+			backend.Concurrency = t.cfg.Transfer.Concurrency
+			t.bulkBackend = backend
+			t.isBulk = true
 			t.initFolderSelection()
 			t.phase = transferPhaseFolders
 		case 1: // USB
 			t.backend = transfer.NewUSBBackend(t.cfg.Transfer.USBPath)
+			t.isBulk = false
 			t.initFolderSelection()
 			t.phase = transferPhaseFolders
 		case 2: // Manual
-			// Stay on this screen showing instructions
+			// Instructions shown in viewMethod below the list
 		}
 	}
 	return t, nil
@@ -231,6 +256,11 @@ func (t *TransferScreen) updateFolders(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 			t.backend.Close()
 			t.backend = nil
 		}
+		if t.bulkBackend != nil {
+			t.bulkBackend.Close()
+			t.bulkBackend = nil
+		}
+		t.isBulk = false
 		t.phase = transferPhaseMethod
 	case key.Matches(msg, tui.Keys.Up):
 		if t.folderCursor > 0 {
@@ -243,8 +273,11 @@ func (t *TransferScreen) updateFolders(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 	case msg.Type == tea.KeySpace:
 		t.folderOptions[t.folderCursor].selected = !t.folderOptions[t.folderCursor].selected
 	case key.Matches(msg, tui.Keys.Enter):
-		// Require at least one selection
 		if len(t.selectedFolders()) > 0 {
+			if t.isBulk {
+				t.phase = transferPhaseProgress
+				return t, t.startBulkTransfer()
+			}
 			t.phase = transferPhaseConnect
 			return t, t.connect()
 		}
@@ -275,8 +308,7 @@ func (t *TransferScreen) selectedLabels() []string {
 func (t *TransferScreen) connect() tea.Cmd {
 	backend := t.backend
 	return func() tea.Msg {
-		ctx := context.Background()
-		err := backend.Connect(ctx)
+		err := backend.Connect(context.Background())
 		return transferConnectMsg{err: err}
 	}
 }
@@ -288,7 +320,6 @@ func (t *TransferScreen) buildPlan() tea.Cmd {
 	t.planFolderLabels = t.selectedLabels()
 
 	return func() tea.Msg {
-		ctx := context.Background()
 		rootDir := ""
 		if len(cfg.SourceDirs) > 0 {
 			rootDir = cfg.SourceDirs[0]
@@ -297,20 +328,14 @@ func (t *TransferScreen) buildPlan() tea.Cmd {
 		var plans []*transfer.TransferPlan
 		for _, folder := range selected {
 			localDir := filepath.Join(rootDir, folder)
-			var remoteBase string
-			if _, ok := backend.(*transfer.USBBackend); ok {
-				remoteBase = folder
-			} else {
-				remoteBase = path.Join(cfg.Device.RootPath, folder)
-			}
-			plan, err := transfer.BuildTransferPlan(ctx, backend, localDir, remoteBase, cfg.Transfer.SyncMode)
+			remoteBase := folder // USB: relative path
+			plan, err := transfer.BuildTransferPlan(context.Background(), backend, localDir, remoteBase, cfg.Transfer.SyncMode)
 			if err != nil {
-				continue // skip folders that don't exist locally
+				continue
 			}
 			plans = append(plans, plan)
 		}
-		merged := transfer.MergeTransferPlans(plans...)
-		return transferPlanMsg{plan: merged}
+		return transferPlanMsg{plan: transfer.MergeTransferPlans(plans...)}
 	}
 }
 
@@ -340,6 +365,44 @@ func (t *TransferScreen) startTransfer() tea.Cmd {
 	)
 }
 
+func (t *TransferScreen) startBulkTransfer() tea.Cmd {
+	folders := t.buildFolderMappings()
+	backend := t.bulkBackend
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.cancel = cancel
+
+	progressCh := make(chan transfer.TransferProgress, 100)
+	t.progressCh = progressCh
+
+	errCh := make(chan error, 1)
+	go func() {
+		err := backend.TransferFolders(ctx, folders, progressCh)
+		errCh <- err
+	}()
+
+	return tea.Batch(
+		listenTransferProgress(progressCh),
+		waitTransferDone(errCh),
+	)
+}
+
+func (t *TransferScreen) buildFolderMappings() []transfer.FolderMapping {
+	rootDir := ""
+	if len(t.cfg.SourceDirs) > 0 {
+		rootDir = t.cfg.SourceDirs[0]
+	}
+
+	var mappings []transfer.FolderMapping
+	for _, folder := range t.selectedFolders() {
+		mappings = append(mappings, transfer.FolderMapping{
+			LocalDir:  filepath.Join(rootDir, folder),
+			RemoteDir: path.Join(t.cfg.Device.RootPath, folder),
+		})
+	}
+	return mappings
+}
+
 func listenTransferProgress(ch <-chan transfer.TransferProgress) tea.Cmd {
 	return func() tea.Msg {
 		p, ok := <-ch
@@ -352,8 +415,7 @@ func listenTransferProgress(ch <-chan transfer.TransferProgress) tea.Cmd {
 
 func waitTransferDone(ch <-chan error) tea.Cmd {
 	return func() tea.Msg {
-		err := <-ch
-		return transferDoneMsg{err: err}
+		return transferDoneMsg{err: <-ch}
 	}
 }
 
@@ -395,7 +457,11 @@ func (t *TransferScreen) viewMethod() string {
 		s += cursor + style.Render(method) + "\n"
 	}
 
-	if t.cursor == 2 {
+	if t.toolErr != "" {
+		s += "\n" + tui.StyleError.Render(t.toolErr) + "\n"
+	}
+
+	if t.cursor == 2 { // Manual Instructions
 		s += "\n" + tui.StyleDim.Render("Manual transfer instructions:") + "\n"
 		s += tui.StyleDim.Render("1. Copy the desired folders (roms/, bios/, saves/, config/) to a USB drive") + "\n"
 		s += tui.StyleDim.Render("2. Insert into your ReplayOS device") + "\n"
@@ -429,7 +495,7 @@ func (t *TransferScreen) viewFolders() string {
 
 func (t *TransferScreen) viewConnect() string {
 	s := tui.StyleSubtitle.Render("Connecting...") + "\n\n"
-	s += tui.StyleDim.Render(fmt.Sprintf("Host: %s:%d", t.cfg.Device.Host, t.cfg.Device.Port))
+	s += tui.StyleDim.Render(fmt.Sprintf("Mounting: %s", t.cfg.Transfer.USBPath))
 	return lipgloss.NewStyle().Padding(1, 2).Render(s)
 }
 
@@ -460,29 +526,50 @@ func (t *TransferScreen) viewProgress() string {
 
 	p := t.currentProgress
 	if p.TotalFiles > 0 {
-		s += fmt.Sprintf("File %d / %d: %s\n", p.FileIndex+1, p.TotalFiles, p.Filename)
-		if p.FileSize > 0 {
-			pct := float64(p.BytesSent) / float64(p.FileSize) * 100
-			s += renderProgressBar(pct, 40) + "\n"
-		}
-		s += "\n"
-		if p.TotalSize > 0 {
-			totalPct := float64(p.TotalSent) / float64(p.TotalSize) * 100
-			s += fmt.Sprintf("Overall: %s / %s\n", formatBytes(p.TotalSent), formatBytes(p.TotalSize))
-			s += renderProgressBar(totalPct, 40) + "\n"
+		if t.isBulk {
+			// rsync: folder-level progress (BytesSent=pct 0-100, FileSize=100)
+			s += fmt.Sprintf("Folder %d / %d: %s\n", p.FileIndex+1, p.TotalFiles, p.Filename)
+			if p.FileSize > 0 {
+				pct := float64(p.BytesSent) / float64(p.FileSize) * 100
+				s += renderProgressBar(pct, 40) + "\n"
+			}
+			s += "\n"
+			if p.TotalSize > 0 {
+				totalPct := float64(p.TotalSent) / float64(p.TotalSize) * 100
+				completedFolders := p.TotalSent / 100
+				s += fmt.Sprintf("Overall: %d / %d folders\n", completedFolders, p.TotalFiles)
+				s += renderProgressBar(totalPct, 40) + "\n"
+			}
+		} else {
+			// USB: file-level progress with byte counts
+			s += fmt.Sprintf("File %d / %d: %s\n", p.FileIndex+1, p.TotalFiles, p.Filename)
+			if p.FileSize > 0 {
+				pct := float64(p.BytesSent) / float64(p.FileSize) * 100
+				s += renderProgressBar(pct, 40) + "\n"
+			}
+			s += "\n"
+			if p.TotalSize > 0 {
+				totalPct := float64(p.TotalSent) / float64(p.TotalSize) * 100
+				s += fmt.Sprintf("Overall: %s / %s\n", formatBytes(p.TotalSent), formatBytes(p.TotalSize))
+				s += renderProgressBar(totalPct, 40) + "\n"
+			}
 		}
 	}
 
 	s += "\n" + tui.StyleDim.Render("esc: cancel transfer")
-
 	return lipgloss.NewStyle().Padding(1, 2).Render(s)
 }
 
 func (t *TransferScreen) viewResults() string {
 	s := tui.StyleSubtitle.Render("Transfer Complete") + "\n\n"
 
-	s += fmt.Sprintf("%s %d files transferred\n",
-		tui.StyleSuccess.Render("OK"), t.filesTransferred)
+	if t.isBulk {
+		s += fmt.Sprintf("%s %d folders transferred\n",
+			tui.StyleSuccess.Render("OK"), t.itemsTransferred)
+	} else {
+		s += fmt.Sprintf("%s %d files transferred\n",
+			tui.StyleSuccess.Render("OK"), t.itemsTransferred)
+	}
 
 	if t.totalErr != nil {
 		s += tui.StyleError.Render("Error: "+t.totalErr.Error()) + "\n"

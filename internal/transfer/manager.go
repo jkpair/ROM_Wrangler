@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,24 @@ type TransferBackend interface {
 	MkdirAll(path string) error
 	FileExists(path string, expectedSize int64) (bool, error)
 	Upload(ctx context.Context, localPath, remotePath string, progressFn func(written int64)) error
+}
+
+// FolderMapping maps a local directory to a remote directory for bulk transfers.
+type FolderMapping struct {
+	LocalDir  string
+	RemoteDir string
+}
+
+// BulkTransferBackend is the interface for transfer methods that operate on
+// entire folders (e.g. rsync, scp) rather than individual files.
+type BulkTransferBackend interface {
+	TransferFolders(ctx context.Context, folders []FolderMapping, progressCh chan<- TransferProgress) error
+	Close() error
+}
+
+// FindTool checks if an external tool is available in PATH.
+func FindTool(name string) (string, error) {
+	return exec.LookPath(name)
 }
 
 // TransferItem describes a single file to transfer.
