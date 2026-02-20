@@ -23,15 +23,15 @@ import (
 type managePhase int
 
 const (
-	managePhaseScan managePhase = iota
-	managePhaseResolve // resolve misplaced/unresolved ROMs
-	managePhaseAssign  // manual system assignment for remaining unresolved
+	managePhaseScan    managePhase = iota
+	managePhaseResolve             // resolve misplaced/unresolved ROMs
+	managePhaseAssign              // manual system assignment for remaining unresolved
 	managePhaseReview
 	managePhaseExtracting
 	managePhaseReScan
 	managePhaseDedupFilter
 	managePhaseConverting
-	managePhaseSorting   // build sort plan + execute automatically
+	managePhaseSorting // build sort plan + execute automatically
 	managePhaseArchiving
 	managePhaseTransfer // transfer option before results
 	managePhaseResults
@@ -119,19 +119,19 @@ type ManageScreen struct {
 	}
 
 	// Manual system assignment for remaining unresolved files
-	assignFiles     []string                       // unresolved file paths
-	assignCursor    int                            // cursor in file list
-	assignSysCursor int                            // cursor in system picker
-	assignPicking   bool                           // true = system picker focused
-	assignSystems   []systems.SystemID             // filtered systems for current file
-	assignChoices   map[string]systems.SystemID    // user assignments: path -> system
+	assignFiles     []string                    // unresolved file paths
+	assignCursor    int                         // cursor in file list
+	assignSysCursor int                         // cursor in system picker
+	assignPicking   bool                        // true = system picker focused
+	assignSystems   []systems.SystemID          // filtered systems for current file
+	assignChoices   map[string]systems.SystemID // user assignments: path -> system
 
 	// Extraction
-	extractable        []organizer.ExtractableFile
-	extractProcessed   []organizer.ExtractableFile // archives that were extracted (for deferred archiving)
-	extractResult      *organizer.ExtractResult
-	extractProgressCh  <-chan extractProgressMsg
-	extractProgress    struct {
+	extractable       []organizer.ExtractableFile
+	extractProcessed  []organizer.ExtractableFile // archives that were extracted (for deferred archiving)
+	extractResult     *organizer.ExtractResult
+	extractProgressCh <-chan extractProgressMsg
+	extractProgress   struct {
 		current  int
 		total    int
 		filename string
@@ -161,13 +161,10 @@ type ManageScreen struct {
 	}
 
 	// Plan
-	sortPlan   *organizer.SortPlan
-	planResult *organizer.PlanResult
-	outputDir  string
-
-	// Transfer option
-	transferCursor         int  // 0=rsync, 1=USB, 2=Manual, 3=Skip
-	showManualInstructions bool
+	sortPlan       *organizer.SortPlan
+	planResult     *organizer.PlanResult
+	outputDir      string
+	transferCursor int
 
 	// UI state
 	cursor     int
@@ -295,7 +292,6 @@ func (m *ManageScreen) Update(msg tea.Msg) (tui.Screen, tea.Cmd) {
 	case archiveDoneMsg:
 		m.archiveResult = msg.result
 		m.transferCursor = 0
-		m.showManualInstructions = false
 		m.phase = managePhaseTransfer
 
 	case planProgressMsg:
@@ -414,17 +410,15 @@ func (m *ManageScreen) updateTransfer(msg tea.KeyMsg) (tui.Screen, tea.Cmd) {
 			m.transferCursor--
 		}
 	case key.Matches(msg, tui.Keys.Down):
-		if m.transferCursor < 3 {
+		if m.transferCursor < 1 {
 			m.transferCursor++
 		}
 	case key.Matches(msg, tui.Keys.Enter):
 		switch m.transferCursor {
-		case 0, 1: // rsync, USB → navigate to Transfer screen
-			return m, func() tea.Msg { return tui.NavigateMsg{Screen: tui.ScreenTransfer} }
-		case 2: // Manual instructions
-			m.showManualInstructions = true
+		case 0: // Transfer
 			m.phase = managePhaseResults
-		case 3: // Skip
+			return m, func() tea.Msg { return tui.NavigateMsg{Screen: tui.ScreenTransfer} }
+		case 1: // Skip
 			m.phase = managePhaseResults
 		}
 	case key.Matches(msg, tui.Keys.Back):
@@ -1009,11 +1003,9 @@ func (m *ManageScreen) viewSorting() string {
 
 func (m *ManageScreen) viewTransfer() string {
 	s := tui.StyleSubtitle.Render("Transfer to Device") + "\n\n"
-	s += "How would you like to transfer your organized ROMs?\n\n"
+	s += "Would you like to transfer your organized ROMs?\n\n"
 	options := []string{
-		"Transfer via rsync",
-		"Transfer via USB",
-		"Show manual instructions",
+		"Transfer",
 		"Skip",
 	}
 	for i, opt := range options {
@@ -1118,15 +1110,6 @@ func (m *ManageScreen) viewResults() string {
 			s += fmt.Sprintf("\n%s Archive deleted\n",
 				tui.StyleSuccess.Render("OK"))
 		}
-	}
-
-	// Manual transfer instructions
-	if m.showManualInstructions {
-		s += "\n" + tui.StyleSubtitle.Render("Manual Transfer Instructions") + "\n\n"
-		s += "1. Copy the roms/ folder to a USB drive (exFAT format)\n"
-		s += "2. Insert into your ReplayOS device\n"
-		s += "3. Or use SFTP: sftp root@<device-ip>\n"
-		s += "   Default credentials: root:replayos (port 22)\n"
 	}
 
 	helpText := "enter/esc: done"
